@@ -1,5 +1,5 @@
 # Hi, my name is Carlos Fernández👋
-### ![Software Engineer]("https://github.com/ruky00/ruky00/blob/main/software.jfif") .
+### ![Software Engineer].
 
 I am a Software Engineer Studient trying to achieve my goals
 
