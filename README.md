@@ -23,6 +23,7 @@ I´m in fourth year of my studies and I will finish them in 2024
 [![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white&labelColor=101010)]()
 </br>
 [![Docker](https://img.shields.io/badge/Docker-4479A1?style=for-the-badge&logo=docker&logoColor=white&labelColor=101010)]()
+</br>
 And more...
 
 ## Find me in:
