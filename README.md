@@ -5,7 +5,7 @@ I am a Software Engineer Studient trying to achieve my goals
 
 I´m in fourth year of my studies and I will finish them in 2024 
 
-## Tecnologías:
+## Skills:
 [![Python](https://img.shields.io/badge/Python-yellow?style=for-the-badge&logo=python&logoColor=white&labelColor=101010)]()
 </br>
 [![Java](https://img.shields.io/badge/Java-007396?style=for-the-badge&logo=java&logoColor=white&labelColor=101010)]()
