@@ -1,9 +1,9 @@
 # Hi, my name is Carlos Fernández👋
-### ![Software Engineer].
+### Software Engineer.
 
-I am a Software Engineer Studient trying to achieve my goals
+I am a Software Engineer Studient trying to achieve my goals.
 
-I´m in fourth year of my studies and I will finish them in 2024 
+I´m in fourth year of my studies and I will finish them in 2024.
 
 ## Skills:
 [![Python](https://img.shields.io/badge/Python-yellow?style=for-the-badge&logo=python&logoColor=white&labelColor=101010)]()
