@@ -15,6 +15,8 @@ montecarlo  : trade-bootstrap Monte-Carlo robustness analysis
 portfolio   : risk-based portfolio construction & allocation
 risk        : position sizing and risk/reward helpers
 paper       : persistent paper-trading engine for forward testing
+optimize    : grid search + walk-forward (out-of-sample) parameter tuning
+anomalies   : daily-edge scanner (overnight, gaps, day-of-week, lead-lag)
 
 This is an educational research toolkit. Nothing here is financial advice.
 See README.md for the full disclaimer.
@@ -35,4 +37,6 @@ from . import (  # noqa: F401
     portfolio,
     risk,
     paper,
+    optimize,
+    anomalies,
 )

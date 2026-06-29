@@ -12,7 +12,7 @@ import pandas as pd
 
 from qflow import (
     data, feeds, indicators as ind, metrics, backtest, strategies,
-    regime, multifactor, montecarlo, portfolio, risk,
+    regime, multifactor, montecarlo, portfolio, risk, optimize, anomalies,
 )
 from qflow.paper import PaperTrader
 
@@ -141,6 +141,38 @@ def test_paper_trader_forward_and_idempotent(tmp_path=None):
     # readiness returns a structured verdict
     r = pt.readiness()
     assert r["total"] == len(r["checks"]) and "verdict" in r
+
+
+def test_anomaly_scan_and_backtests():
+    df = data.synthetic_ohlcv(1000, seed=3)
+    sc = anomalies.scan(df)
+    assert set(sc) >= {"overnight_vs_intraday", "gap_behaviour",
+                       "day_of_week", "autocorrelation"}
+    # t-stats finite
+    for k, v in sc["day_of_week"].items():
+        assert np.isfinite(v["t"])
+    gf = anomalies.backtest_gap_fade(df)
+    assert gf["equity"].iloc[-1] > 0 and np.isfinite(gf["Sharpe"])
+    ll = anomalies.backtest_lead_lag(df, data.synthetic_ohlcv(1000, seed=4))
+    assert "Sharpe" in ll and ll["equity"].iloc[-1] > 0
+
+
+def test_walk_forward_oos():
+    df = data.synthetic_ohlcv(1500, seed=5)
+    grid = {"rsi_buy": [5, 10], "rsi_exit": [55, 65]}
+    wf = optimize.walk_forward(df, "mean_reversion", grid, n_splits=2,
+                               train_frac=0.5, min_trades=1)
+    assert "oos_stats" in wf
+    assert np.isfinite(wf["oos_stats"]["OOS Sharpe"])
+
+
+def test_grid_search_ranks():
+    df = data.synthetic_ohlcv(1200, seed=6)
+    res = optimize.grid_search(df, "trend_following",
+                               {"fast": [10, 20], "slow": [50, 100]}, min_trades=1)
+    assert not res.empty
+    # sorted descending by score
+    assert res["score"].is_monotonic_decreasing
 
 
 def _run_all():

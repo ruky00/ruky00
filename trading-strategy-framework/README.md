@@ -26,6 +26,8 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/multifactor.py` | Momentum + value + volatility + trend cross-sectional model |
 | `qflow/montecarlo.py` | Trade-bootstrap Monte-Carlo robustness analysis |
 | `qflow/portfolio.py` | Inverse-vol allocation + risk-tolerance overlay |
+| `qflow/optimize.py` | Grid search + **walk-forward** (out-of-sample) tuning |
+| `qflow/anomalies.py` | **Daily-edge scanner** — overnight, gaps, day-of-week, lead-lag |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
 
 The full quant walkthrough — covering strategy generation, backtesting,
@@ -42,8 +44,18 @@ pip install -r requirements.txt        # numpy + pandas
 
 python examples/run_all.py             # full end-to-end demo (synthetic)
 python examples/compare_strategies.py  # backtest all strategies on REAL data
-python tests/test_framework.py         # 12 correctness tests
+python examples/find_edges.py          # hunt daily inefficiencies + walk-forward tuning
+python tests/test_framework.py         # 15 correctness tests
 ```
+
+### Finding daily edges & optimising
+
+`examples/find_edges.py` scans real data for recurring daily inefficiencies and
+backtests the tradeable ones net of costs. On the bundled samples it surfaces a
+**gap-fade edge on high-volatility names** (TSLA, Sharpe 0.77) and a
+**cross-market lead-lag** (one asset leading another by a day, Sharpe ~0.6), and
+walk-forward-optimises mean-reversion out-of-sample. Details in
+**[`docs/EDGES.md`](docs/EDGES.md)**.
 
 ### Forward-test with fake money (the path to going live)
 
@@ -111,10 +123,10 @@ ordinary machine.
 ```
 trading-strategy-framework/
 ├── qflow/            # the framework package (data, feeds, strategies, backtest, paper, ...)
-├── examples/         # run_all.py · compare_strategies.py · paper_trade.py
-├── tests/            # test_framework.py — 12 correctness checks
+├── examples/         # run_all · compare_strategies · find_edges · paper_trade
+├── tests/            # test_framework.py — 15 correctness checks
 ├── data/samples/     # bundled REAL sample datasets (AAPL, TSLA)
-├── docs/             # PLAYBOOK.md · PAPER_TRADING.md · DISCLAIMER.md
+├── docs/             # PLAYBOOK · EDGES · PAPER_TRADING · DISCLAIMER
 ├── requirements.txt
 └── LICENSE           # MIT
 ```
