@@ -5,6 +5,11 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
-data/*.csv
-*.png
 .DS_Store
+
+# runtime data: ignore caches and live paper-trading state...
+data/*.csv
+data/paper/
+# ...but DO bundle the curated real sample datasets
+!data/samples/
+data/samples/*.tmp

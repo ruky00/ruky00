@@ -11,9 +11,10 @@ import numpy as np
 import pandas as pd
 
 from qflow import (
-    data, indicators as ind, metrics, backtest, strategies,
+    data, feeds, indicators as ind, metrics, backtest, strategies,
     regime, multifactor, montecarlo, portfolio, risk,
 )
+from qflow.paper import PaperTrader
 
 
 def _df():
@@ -111,6 +112,35 @@ def test_portfolio_construct():
     out = portfolio.construct(prices, tolerance="medium")
     assert abs(out["weights"].sum() - 1.0) < 1e-9
     assert "expected_return" in out["stats"]
+
+
+def test_feeds_real_sample_offline():
+    # bundled samples must load (network or committed fallback) & be canonical
+    df = feeds.from_github("AAPL")
+    assert list(df.columns) == ["open", "high", "low", "close", "volume"]
+    assert len(df) > 100
+    assert (df["high"] >= df["low"]).all()
+    assert df["volume"].notna().all()
+    assert df.index.is_monotonic_increasing
+
+
+def test_paper_trader_forward_and_idempotent(tmp_path=None):
+    import tempfile
+    root = tempfile.mkdtemp()
+    pt = PaperTrader(symbol="TSLA", source="github",
+                     strategy="trend_following", root=root)
+    out = pt.replay(300)
+    assert out["status"] == "replayed" and out["bars"] > 0
+    m = pt.live_metrics()
+    assert m["days"] > 0
+    # equity must never go non-positive with 1% risk + no leverage
+    assert m["equity"] > 0
+    # idempotency: replaying again processes nothing new
+    again = pt.replay(300)
+    assert again["bars"] == 0
+    # readiness returns a structured verdict
+    r = pt.readiness()
+    assert r["total"] == len(r["checks"]) and "verdict" in r
 
 
 def _run_all():

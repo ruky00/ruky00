@@ -16,6 +16,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | Module | Purpose |
 |--------|---------|
 | `qflow/data.py` | Regime-aware synthetic OHLCV generator + CSV loader |
+| `qflow/feeds.py` | **Real** market data — Binance / Stooq / Yahoo + bundled GitHub samples |
 | `qflow/indicators.py` | SMA, EMA, RSI, ATR, MACD, Bollinger, ADX, z-score |
 | `qflow/strategies.py` | Trend-following, mean-reversion, volatility-breakout |
 | `qflow/backtest.py` | Bar-by-bar engine: risk-based sizing, costs, trade ledger |
@@ -25,6 +26,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/multifactor.py` | Momentum + value + volatility + trend cross-sectional model |
 | `qflow/montecarlo.py` | Trade-bootstrap Monte-Carlo robustness analysis |
 | `qflow/portfolio.py` | Inverse-vol allocation + risk-tolerance overlay |
+| `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
 
 The full quant walkthrough — covering strategy generation, backtesting,
 risk/reward, regime detection, multi-factor models, optimization, portfolio
@@ -38,9 +40,27 @@ detection — is in **[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md)**.
 ```bash
 pip install -r requirements.txt        # numpy + pandas
 
-python examples/run_all.py             # full end-to-end demo (offline)
-python tests/test_framework.py         # 10 correctness tests
+python examples/run_all.py             # full end-to-end demo (synthetic)
+python examples/compare_strategies.py  # backtest all strategies on REAL data
+python tests/test_framework.py         # 12 correctness tests
 ```
+
+### Forward-test with fake money (the path to going live)
+
+Run a strategy on a **virtual $10,000** account against real data. State
+persists between runs, so you run it once a day for a week or two and it resumes
+where it left off — a true forward test, not a re-run.
+
+```bash
+# preview the whole workflow now (replays recent history, one bar = one day)
+python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --reset --replay 15
+
+# the daily routine (run after the close; automate with cron)
+python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --step --report
+```
+
+It journals every fill, tracks the equity curve, and prints a **go-live
+readiness gate**. Full plan: **[`docs/PAPER_TRADING.md`](docs/PAPER_TRADING.md)**.
 
 ### Minimal example
 
@@ -57,12 +77,22 @@ res = backtest.run_backtest(
 print(res.report())          # CAGR, Sharpe, max DD, win rate, ...
 ```
 
-### Use your own data
+### Real data
 
 ```python
+from qflow import feeds
+df = feeds.get("AAPL", "github")                      # bundled real sample (offline-safe)
+df = feeds.get("BTCUSDT", "binance", interval="1d")   # crypto, no API key
+df = feeds.get("aapl.us", "stooq")                    # equities / ETFs / FX
+df = feeds.get("AAPL", "yahoo", rng="10y")            # 10y daily
+# or your own CSV (columns: date,open,high,low,close,volume)
 from qflow import data
-df = data.load_csv("data/BTCUSD.csv")   # columns: date,open,high,low,close,volume
+df = data.load_csv("data/BTCUSD.csv")
 ```
+
+Fetched series are cached under `data/` and reused. In a locked-down network
+only the bundled GitHub samples are reachable; the other feeds work from an
+ordinary machine.
 
 ---
 
@@ -80,10 +110,11 @@ df = data.load_csv("data/BTCUSD.csv")   # columns: date,open,high,low,close,volu
 
 ```
 trading-strategy-framework/
-├── qflow/            # the framework package
-├── examples/         # run_all.py — end-to-end walkthrough
-├── tests/            # test_framework.py — correctness checks
-├── docs/             # PLAYBOOK.md (the quant guide) + DISCLAIMER.md
+├── qflow/            # the framework package (data, feeds, strategies, backtest, paper, ...)
+├── examples/         # run_all.py · compare_strategies.py · paper_trade.py
+├── tests/            # test_framework.py — 12 correctness checks
+├── data/samples/     # bundled REAL sample datasets (AAPL, TSLA)
+├── docs/             # PLAYBOOK.md · PAPER_TRADING.md · DISCLAIMER.md
 ├── requirements.txt
 └── LICENSE           # MIT
 ```
