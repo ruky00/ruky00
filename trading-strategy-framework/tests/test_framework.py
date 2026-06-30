@@ -245,6 +245,56 @@ def test_news_veto_blocks_entry_and_replay_isolated():
     assert any(j["action"] == "SKIP" for j in pt.state.journal)
 
 
+def test_risk_governor_killswitches():
+    from qflow.risk_governor import RiskGovernor
+    g = RiskGovernor({"max_daily_loss": 0.03, "max_portfolio_heat": 0.06,
+                      "max_drawdown": 0.15, "max_consecutive_losses": 3,
+                      "cooldown_days": 2})
+    g.start_day("d1", 10_000)
+    assert g.can_open(100, 10_000)[0]                       # 1% ok
+    g.on_open(100)
+    assert not g.can_open(600, 10_000)[0]                   # heat cap (7%>6%)
+    g.start_day("d2", 10_000)
+    assert not g.can_open(100, 9_650)[0]                    # -3.5% daily loss
+    g2 = RiskGovernor({"max_drawdown": 0.15})
+    g2.start_day("d", 10_000); g2.observe(10_000); g2.observe(8_400)
+    assert g2.state.halted and not g2.can_open(1, 8_400)[0]  # drawdown halt
+
+
+def test_paper_governor_halts_and_persists():
+    import tempfile
+    root = tempfile.mkdtemp()
+    pt = PaperTrader("TSLA", "github", "trend_following", root=root,
+                     risk_limits={"max_drawdown": 0.05})
+    pt.replay(500)
+    assert pt.governor.status()["halted"]                    # tight DD -> halted
+    assert any("risk_halt" in j["reason"] for j in pt.state.journal)
+    # governor peak matches the recorded equity-curve high (consistent anchor)
+    eqmax = max(e["equity"] for e in pt.state.equity_curve)
+    assert abs(pt.governor.status()["peak_equity"] - eqmax) < 1.0
+    # state persists across reload
+    pt2 = PaperTrader("TSLA", "github", "trend_following", root=root)
+    assert pt2.governor.status()["halted"]
+
+
+def test_finbert_optional_and_scorer_swap():
+    from qflow import news
+    # FinBERT degrades gracefully without transformers installed
+    try:
+        news.FinBERTScorer().score("Apple profit surges")
+    except RuntimeError as e:
+        assert "transformers" in str(e)
+    # scorer is swappable behind the same interface
+    class Dummy:
+        def score(self, t): return (0.42, False)
+    news.set_scorer(Dummy())
+    try:
+        items = news.SampleProvider().fetch("AAPL")
+        assert all(it.sentiment == 0.42 for it in items)
+    finally:
+        news.set_scorer(news.LexiconScorer())   # restore for other tests
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

@@ -90,9 +90,78 @@ def score_sentiment(text: str) -> tuple[float, bool]:
     return max(-1.0, min(1.0, score / norm)), is_event
 
 
+class LexiconScorer:
+    """Default fast scorer — the finance lexicon above. No dependencies."""
+    name = "lexicon"
+
+    def score(self, text: str) -> tuple[float, bool]:
+        return score_sentiment(text)
+
+
+class FinBERTScorer:
+    """
+    Optional research-grade scorer using FinBERT (ProsusAI/finbert) via
+    HuggingFace `transformers` + `torch`. These are heavy dependencies and the
+    model (~440 MB) downloads on first use, so it is loaded lazily and only if
+    you explicitly select it:
+
+        from qflow import news
+        news.set_scorer(news.FinBERTScorer())     # then providers use FinBERT
+
+    Sentiment = P(positive) - P(negative); the event flag still comes from the
+    lexicon's EVENT words. Falls back with a clear error if transformers/torch
+    are not installed.
+    """
+    name = "finbert"
+
+    def __init__(self, model: str = "ProsusAI/finbert", device: int = -1):
+        self.model = model
+        self.device = device
+        self._pipe = None
+
+    def _ensure(self):
+        if self._pipe is None:
+            try:
+                from transformers import pipeline
+            except ImportError as e:
+                raise RuntimeError(
+                    "FinBERTScorer needs `transformers` and `torch`:\n"
+                    "    pip install transformers torch\n"
+                    "For a lightweight setup keep the default LexiconScorer."
+                ) from e
+            self._pipe = pipeline("sentiment-analysis", model=self.model,
+                                  device=self.device, truncation=True)
+        return self._pipe
+
+    def score(self, text: str) -> tuple[float, bool]:
+        text = (text or "").strip()
+        if not text:
+            return 0.0, False
+        pipe = self._ensure()
+        out = pipe(text[:512], top_k=None)          # all class scores
+        probs = {d["label"].lower(): d["score"] for d in out}
+        sentiment = probs.get("positive", 0.0) - probs.get("negative", 0.0)
+        is_event = any(t.lower() in lexicon.EVENT for t in _TOKEN.findall(text))
+        return float(max(-1.0, min(1.0, sentiment))), is_event
+
+
+# Active scorer (swappable). Defaults to the dependency-free lexicon.
+_SCORER = LexiconScorer()
+
+
+def set_scorer(scorer) -> None:
+    """Swap the sentiment scorer used by all providers (e.g. a FinBERTScorer)."""
+    global _SCORER
+    _SCORER = scorer
+
+
+def get_scorer():
+    return _SCORER
+
+
 def _score_items(items: list[NewsItem]) -> list[NewsItem]:
     for it in items:
-        s, ev = score_sentiment(f"{it.headline}. {it.summary}")
+        s, ev = _SCORER.score(f"{it.headline}. {it.summary}")
         it.sentiment = round(s, 3)
         it.is_event = ev
     return items

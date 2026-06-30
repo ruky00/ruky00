@@ -43,6 +43,13 @@ def main():
     ap.add_argument("--news", default="none",
                     choices=["none", "sample", "rss", "finnhub", "newsapi"],
                     help="live news overlay applied at --step (not in replay)")
+    ap.add_argument("--finbert", action="store_true",
+                    help="use FinBERT for sentiment (needs transformers+torch)")
+    ap.add_argument("--kill-switches", action="store_true",
+                    help="enable the risk governor with default limits")
+    ap.add_argument("--max-daily-loss", type=float, default=0.03)
+    ap.add_argument("--max-drawdown", type=float, default=0.15)
+    ap.add_argument("--max-heat", type=float, default=0.06)
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--risk", type=float, default=0.01)
     ap.add_argument("--step", action="store_true", help="process the latest bar")
@@ -59,6 +66,8 @@ def main():
     news_provider = None
     if args.news != "none":
         from qflow import news as newsmod
+        if args.finbert:
+            newsmod.set_scorer(newsmod.FinBERTScorer())
         news_provider = {
             "sample": newsmod.SampleProvider,
             "rss": newsmod.RSSProvider,
@@ -66,10 +75,17 @@ def main():
             "newsapi": newsmod.NewsAPIProvider,
         }[args.news]()
 
+    risk_limits = None
+    if args.kill_switches:
+        risk_limits = {"max_daily_loss": args.max_daily_loss,
+                       "max_drawdown": args.max_drawdown,
+                       "max_portfolio_heat": args.max_heat}
+
     kw = dict(symbol=args.symbol, source=args.source, strategy=args.strategy,
               capital=args.capital, risk_per_trade=args.risk,
               feed_kwargs=feed_kwargs, leader_symbol=args.leader_symbol,
-              leader_source=args.leader_source, news_provider=news_provider)
+              leader_source=args.leader_source, news_provider=news_provider,
+              risk_limits=risk_limits)
 
     if args.reset:
         PaperTrader(**kw).reset()

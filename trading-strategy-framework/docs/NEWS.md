@@ -77,9 +77,15 @@ reason, so you can audit every decision the news layer influenced.
 ## Honest limitations
 
 - Headline lexicon sentiment is crude; it will mis-score sarcasm, complex
-  sentences, and novel phrasing. For production, replace the scorer with a
-  finance-tuned transformer (e.g. FinBERT) behind the same `score_sentiment`
-  interface, or load the full Loughran-McDonald dictionary.
+  sentences, and novel phrasing. For production, switch to **FinBERT** (built
+  in) behind the same interface:
+  ```python
+  from qflow import news
+  news.set_scorer(news.FinBERTScorer())   # needs: pip install transformers torch
+  # ...all providers now score with FinBERT; CLI: --news rss --finbert
+  ```
+  FinBERT downloads a ~440 MB model on first use and is much slower than the
+  lexicon, so it is opt-in. The lexicon stays the zero-dependency default.
 - News is **latency-sensitive**: free RSS lags the market by minutes. It is best
   used as a **risk filter** ("don't fight fresh bad news", "halve size into
   earnings") rather than a primary alpha signal.

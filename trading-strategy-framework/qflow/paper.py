@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 from . import feeds, strategies, daily, indicators as ind, metrics
+from .risk_governor import RiskGovernor
 
 # every strategy the paper engine can run, across execution styles
 ALL_STRATEGIES = (set(strategies.REGISTRY)
@@ -79,6 +80,7 @@ class State:
     execution: str = "swing"             # "swing" or "intraday"
     leader_symbol: str = ""              # for lead-lag strategies
     leader_source: str = ""
+    governor: dict = field(default_factory=dict)   # {limits, state} or {}
     position: dict = field(default_factory=lambda: asdict(Position()))
     journal: list = field(default_factory=list)
     equity_curve: list = field(default_factory=list)   # [{date, equity}]
@@ -100,7 +102,8 @@ class PaperTrader:
                  feed_kwargs: dict | None = None,
                  leader_symbol: str = "",
                  leader_source: str = "",
-                 news_provider=None):
+                 news_provider=None,
+                 risk_limits: dict | None = None):
         if strategy not in ALL_STRATEGIES:
             raise ValueError(f"Unknown strategy {strategy!r}. "
                              f"Choose from {sorted(ALL_STRATEGIES)}.")
@@ -114,6 +117,7 @@ class PaperTrader:
         self.news_provider = news_provider     # optional live news overlay
         self._news_mult = 1.0                  # transient: applied only in step()
         self._news_reason = ""
+        self.governor = None                   # set after state is ready
         self.dir = os.path.join(root, f"{symbol}_{strategy}")
         os.makedirs(self.dir, exist_ok=True)
         self.state_path = os.path.join(self.dir, "state.json")
@@ -130,15 +134,34 @@ class PaperTrader:
                 balance=capital,
                 leader_symbol=leader_symbol,
                 leader_source=leader_source or source,
+                governor={"limits": dict(RiskGovernor(risk_limits).limits),
+                          "state": asdict(RiskGovernor(risk_limits).state)}
+                if risk_limits is not None else {},
             )
             self._save()
+
+        # allow enabling/retuning limits on an existing account
+        if risk_limits is not None and self.state.governor.get("limits") != \
+                {**RiskGovernor().limits, **risk_limits}:
+            g = RiskGovernor(risk_limits, self.state.governor.get("state"))
+            self.state.governor = g.to_dict()
+
+        # live governor instance (None if no limits configured)
+        self.governor = (RiskGovernor(self.state.governor["limits"],
+                                      self.state.governor["state"])
+                         if self.state.governor else None)
 
     # ----------------------- persistence ----------------------- #
     def _load(self) -> State:
         with open(self.state_path) as f:
             return State(**json.load(f))
 
+    def _sync_governor(self) -> None:
+        if self.governor is not None:
+            self.state.governor = self.governor.to_dict()
+
     def _save(self) -> None:
+        self._sync_governor()
         with open(self.state_path, "w") as f:
             json.dump(asdict(self.state), f, indent=2, default=str)
         # convenience CSV exports
@@ -188,12 +211,17 @@ class PaperTrader:
             return self._process_bar_intraday(df, i, atr_series, sig)
 
         date = df.index[i]
+        dstr = str(date.date() if hasattr(date, "date") else date)
         o, h, l, c = (float(df["open"].iloc[i]), float(df["high"].iloc[i]),
                       float(df["low"].iloc[i]), float(df["close"].iloc[i]))
         target_sig = int(sig.signal.iloc[i])
         atr = float(atr_series.iloc[i]) if not np.isnan(atr_series.iloc[i]) else 0.0
         fee = self.state.fee
         p = Position(**self.state.position)
+        if self.governor:
+            prev_eq = (self.state.equity_curve[-1]["equity"]
+                       if self.state.equity_curve else self.state.balance)
+            self.governor.start_day(dstr, prev_eq)
 
         # 1) manage an open position on this bar (stop/target intrabar)
         if p.is_open:
@@ -214,6 +242,8 @@ class PaperTrader:
                 fill = exit_px * (1 - fee * p.direction)
                 pnl = p.direction * (fill - p.entry) * p.shares
                 self.state.balance += pnl
+                if self.governor:
+                    self.governor.on_close(pnl, p.risk_amt, self._equity(c))
                 p = Position()  # flat
                 self.state.position = asdict(p)
                 self._log(date, "CLOSE", "-", fill, 0, reason, pnl, c)
@@ -234,6 +264,14 @@ class PaperTrader:
                 shares = risk_amt / stop_dist
                 shares = min(shares, equity_now / entry) * self._news_mult  # news sizing
                 risk_amt = shares * stop_dist
+                gov_ok, gov_why = (self.governor.can_open(risk_amt, equity_now)
+                                   if self.governor else (True, ""))
+                if not gov_ok:
+                    self._log(date, "SKIP", "LONG" if direction == 1 else "SHORT",
+                              c, 0, f"risk_halt: {gov_why}", 0.0, c)
+                    target_sig = 0
+                    p = Position(**self.state.position)   # stay flat
+            if target_sig != 0 and self._news_mult > 0.0:
                 p = Position(
                     direction=direction, shares=shares, entry=entry,
                     stop=entry - direction * stop_dist,
@@ -242,17 +280,20 @@ class PaperTrader:
                     entry_date=str(date.date() if hasattr(date, "date") else date),
                 )
                 self.state.position = asdict(p)
+                if self.governor:
+                    self.governor.on_open(risk_amt)
                 side = "LONG" if direction == 1 else "SHORT"
                 reason = "entry" + (f" (news x{self._news_mult:g})"
                                     if self._news_mult < 1.0 else "")
                 self._log(date, "OPEN", side, entry, shares, reason, 0.0, c)
 
         # 3) record equity + advance the clock
+        if self.governor:
+            self.governor.observe(self._equity(c))
         self.state.equity_curve.append({
-            "date": str(date.date() if hasattr(date, "date") else date),
-            "equity": round(self._equity(c), 2),
+            "date": dstr, "equity": round(self._equity(c), 2),
         })
-        self.state.last_date = str(date.date() if hasattr(date, "date") else date)
+        self.state.last_date = dstr
 
     def _process_bar_intraday(self, df, i, atr_series, sig) -> None:
         """
@@ -267,16 +308,27 @@ class PaperTrader:
         atr = float(atr_series.iloc[i]) if not np.isnan(atr_series.iloc[i]) else 0.0
         fee = self.state.fee
         dstr = str(date.date() if hasattr(date, "date") else date)
+        if self.governor:
+            prev_eq = (self.state.equity_curve[-1]["equity"]
+                       if self.state.equity_curve else self.state.balance)
+            self.governor.start_day(dstr, prev_eq)
 
-        if target_sig != 0 and atr > 0 and o > 0 and self._news_mult <= 0.0:
+        tradeable = target_sig != 0 and atr > 0 and o > 0
+        risk_amt = self.state.balance * self.state.risk_per_trade
+        gov_ok, gov_why = (self.governor.can_open(risk_amt, self.state.balance)
+                           if (self.governor and tradeable) else (True, ""))
+
+        if tradeable and self._news_mult <= 0.0:
             self._log(date, "SKIP", "LONG" if target_sig == 1 else "SHORT",
                       o, 0, f"news_veto: {self._news_reason}", 0.0, o)
-        elif target_sig != 0 and atr > 0 and o > 0:
+        elif tradeable and not gov_ok:
+            self._log(date, "SKIP", "LONG" if target_sig == 1 else "SHORT",
+                      o, 0, f"risk_halt: {gov_why}", 0.0, o)
+        elif tradeable:
             direction = target_sig
             entry = o * (1 + fee * direction)
             stop_dist = self.state.stop_atr * atr            # sizing proxy only
             equity_now = self.state.balance
-            risk_amt = equity_now * self.state.risk_per_trade
             shares = min(risk_amt / stop_dist, equity_now / entry) * self._news_mult
             exit_fill = c * (1 - fee * direction)
             pnl = direction * (exit_fill - entry) * shares
@@ -285,8 +337,12 @@ class PaperTrader:
             self._log(date, "OPEN", side, entry, shares, reason, 0.0, o)
             self.state.balance += pnl
             self._log(date, "CLOSE", "-", exit_fill, 0, "close", pnl, c)
+            if self.governor:
+                self.governor.on_close(pnl, shares * stop_dist, self.state.balance)
 
         # always flat overnight; record equity = realised balance
+        if self.governor:
+            self.governor.observe(self.state.balance)
         self.state.equity_curve.append({"date": dstr, "equity": round(self.state.balance, 2)})
         self.state.last_date = dstr
 
@@ -429,6 +485,14 @@ class PaperTrader:
                          f"stop {p.stop:.2f} target {p.target:.2f}")
         else:
             lines.append("OPEN position      : flat")
+        if self.governor:
+            gs = self.governor.status()
+            state = ("HALTED" if gs["halted"] else
+                     f"cooldown {gs['cooldown_left']}d" if gs["cooldown_left"] else "active")
+            lines.append(f"Risk governor      : {state}  "
+                         f"(open risk ${gs['open_risk']:.0f}, "
+                         f"streak {gs['consecutive_losses']})"
+                         + (f"  — {gs['last_reason']}" if gs['last_reason'] else ""))
         if self.news_provider:
             ns = self.news_status()
             if ns.get("enabled") and "error" not in ns:

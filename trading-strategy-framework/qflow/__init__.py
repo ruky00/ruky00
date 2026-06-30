@@ -15,6 +15,7 @@ multifactor : momentum + value + volatility + trend cross-sectional model
 montecarlo  : trade-bootstrap Monte-Carlo robustness analysis
 portfolio   : risk-based portfolio construction & allocation
 risk        : position sizing and risk/reward helpers
+risk_governor: portfolio kill-switches (daily loss, drawdown, heat, streak)
 paper       : persistent paper-trading engine for forward testing
 optimize    : grid search + walk-forward (out-of-sample) parameter tuning
 anomalies   : daily-edge scanner (overnight, gaps, day-of-week, lead-lag)
@@ -39,6 +40,7 @@ from . import (  # noqa: F401
     montecarlo,
     portfolio,
     risk,
+    risk_governor,
     paper,
     optimize,
     anomalies,
