@@ -313,6 +313,33 @@ def test_edge_lab_evaluate_and_scan():
     assert sig.isin([-1, 0, 1]).all()
 
 
+def test_universe_scan_and_error_handling():
+    from qflow import universe
+    res = universe.scan_universe(["AAPL", "TSLA", "NOPE_BAD"], source="github",
+                                 min_consistency=0.5)
+    assert res["n_symbols"] == 3
+    assert "NOPE_BAD" in res["errors"]          # bad symbol skipped, not fatal
+    assert res["n_scanned"] == 2
+    # robust list is ranked and every row carries its symbol + passes filters
+    for r in res["robust"]:
+        assert r["symbol"] in ("AAPL", "TSLA")
+        assert r["consistency"] >= 0.5 and r["tradeable"]
+    assert res["robust"] == sorted(res["robust"], key=lambda r: r["score"], reverse=True)
+    assert isinstance(universe.report(res), str)
+
+
+def test_dual_listing_pair_and_scan():
+    from qflow import dual_listing, feeds
+    aapl = feeds.get("AAPL", "github")
+    tsla = feeds.get("TSLA", "github")
+    r = dual_listing.analyze_pair(aapl, tsla, "AAPL/TSLA")
+    assert set(r) >= {"us_leads_madrid", "madrid_leads_us", "best"}
+    assert "sharpe" in r["best"] and "consistency" in r["best"]
+    # scanning with an unreachable source degrades gracefully into errors
+    dl = dual_listing.scan_dual_listings(source="yahoo", names=["Santander"])
+    assert "results" in dl and "errors" in dl
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

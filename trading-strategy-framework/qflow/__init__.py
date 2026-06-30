@@ -20,6 +20,8 @@ paper       : persistent paper-trading engine for forward testing
 optimize    : grid search + walk-forward (out-of-sample) parameter tuning
 anomalies   : daily-edge scanner (overnight, gaps, day-of-week, lead-lag)
 edge_lab    : repeatable-edge lab (significance + consistency + OOS persistence)
+universe    : scan a whole universe (IBEX-35 / S&P-500) for robust patterns
+dual_listing: España<->US cross-listing lead-lag (Santander/BBVA/Telefonica ADRs)
 news        : provider-agnostic news + finance sentiment (RSS/Finnhub/Bloomberg)
 
 This is an educational research toolkit. Nothing here is financial advice.
@@ -46,5 +48,7 @@ from . import (  # noqa: F401
     optimize,
     anomalies,
     edge_lab,
+    universe,
+    dual_listing,
     news,
 )

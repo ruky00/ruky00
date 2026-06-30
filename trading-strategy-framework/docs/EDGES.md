@@ -155,6 +155,43 @@ which is itself information: it confirms fading (not chasing) gaps is correct.
 > Run it on 10y data (`feeds.get(sym, "yahoo", rng="10y")`) for statistics you
 > can actually trust — 2–4 years is too few calendar years to judge consistency.
 
+## 4c. Scanning a whole universe + España↔US dual listings
+
+Two stocks aren't enough to find "a stock that always reacts the same way" — you
+need to scan **hundreds**. `qflow/universe.py` runs the repeatable-edge lab over
+a whole universe and returns only the patterns that pass every robustness filter.
+
+```python
+from qflow import universe
+res = universe.scan_universe(universe.IBEX35, source="yahoo")   # 35 Spanish blue chips
+# or universe.SP500_LIQUID
+print(universe.report(res))     # ranked shortlist: symbol · pattern · consistency · OOS
+```
+
+`qflow/dual_listing.py` targets the **structural** España↔US edge: a few Spanish
+names trade in both Madrid and as NYSE ADRs (Santander `SAN`, BBVA `BBVA`,
+Telefónica `TEF`). Because the US ADR keeps trading after Madrid closes, its late
+move tends to **lead Madrid's next-day open** — a genuine, recurring lag from the
+offset trading hours, not random correlation.
+
+```python
+from qflow import dual_listing
+dl = dual_listing.scan_dual_listings(source="yahoo")   # Santander, BBVA, Telefónica...
+print(dual_listing.report(dl))
+# or one pair in detail:
+mad = feeds.get("SAN.MC", "yahoo", rng="10y")
+us  = feeds.get("SAN",    "yahoo", rng="10y")
+print(dual_listing.analyze_pair(mad, us, "Santander")["best"])
+```
+
+```bash
+python examples/scan_universe.py        # offline demo; set OPEN_NETWORK=True for real data
+```
+
+> A wide scan tests many hypotheses, so it inflates false positives — that's why
+> the report ends by telling you to **paper-test the shortlist, never trade it
+> blind**. Use 10y data so "consistency" spans 10 calendar years.
+
 ## 5. Forward-testing the edges (now built into the paper engine)
 
 Both edges are wired into the paper-trading engine as **intraday** strategies

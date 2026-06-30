@@ -28,6 +28,9 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/portfolio.py` | Inverse-vol allocation + risk-tolerance overlay |
 | `qflow/optimize.py` | Grid search + **walk-forward** (out-of-sample) tuning |
 | `qflow/anomalies.py` | **Daily-edge scanner** — overnight, gaps, day-of-week, lead-lag |
+| `qflow/edge_lab.py` | **Repeatable-edge lab** — significance + consistency + OOS persistence |
+| `qflow/universe.py` | **Universe scanner** — sweep IBEX-35 / S&P-500 for robust patterns |
+| `qflow/dual_listing.py` | **España↔US lead-lag** — Santander/BBVA/Telefónica cross-listings |
 | `qflow/news.py` | **News + sentiment** — provider-agnostic (RSS/Finnhub/Bloomberg/FinBERT) trade overlay |
 | `qflow/risk_governor.py` | **Kill-switches** — daily-loss / drawdown / heat / streak circuit breakers |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
@@ -48,7 +51,8 @@ python examples/run_all.py             # full end-to-end demo (synthetic)
 python examples/compare_strategies.py  # backtest all strategies on REAL data
 python examples/find_edges.py          # hunt daily inefficiencies + walk-forward tuning
 python examples/repeatable_edges.py    # rank patterns by year-to-year repeatability
-python tests/test_framework.py         # 24 correctness tests
+python examples/scan_universe.py       # scan a whole universe + España<->US dual listings
+python tests/test_framework.py         # 26 correctness tests
 ```
 
 ### Finding daily edges & optimising
