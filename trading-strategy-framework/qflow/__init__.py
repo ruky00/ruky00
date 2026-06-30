@@ -19,6 +19,7 @@ risk_governor: portfolio kill-switches (daily loss, drawdown, heat, streak)
 paper       : persistent paper-trading engine for forward testing
 optimize    : grid search + walk-forward (out-of-sample) parameter tuning
 anomalies   : daily-edge scanner (overnight, gaps, day-of-week, lead-lag)
+edge_lab    : repeatable-edge lab (significance + consistency + OOS persistence)
 news        : provider-agnostic news + finance sentiment (RSS/Finnhub/Bloomberg)
 
 This is an educational research toolkit. Nothing here is financial advice.
@@ -44,5 +45,6 @@ from . import (  # noqa: F401
     paper,
     optimize,
     anomalies,
+    edge_lab,
     news,
 )

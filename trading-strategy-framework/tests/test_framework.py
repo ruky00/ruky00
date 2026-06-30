@@ -295,6 +295,24 @@ def test_finbert_optional_and_scorer_swap():
         news.set_scorer(news.LexiconScorer())   # restore for other tests
 
 
+def test_edge_lab_evaluate_and_scan():
+    from qflow import edge_lab
+    df = data.synthetic_ohlcv(1500, seed=11)
+    sig = edge_lab.sig_gap_fade(df)
+    ev = edge_lab.evaluate(df, sig, "gap_fade")
+    for k in ("sharpe", "t_stat", "p_value", "consistency", "oos_sharpe_1h",
+              "oos_sharpe_2h", "score"):
+        assert k in ev
+    assert 0.0 <= ev["consistency"] <= 1.0
+    assert 0.0 <= ev["p_value"] <= 1.0
+    rows = edge_lab.scan(df, leader=data.synthetic_ohlcv(1500, seed=12))
+    # ranked by score descending; lead_lag present because a leader was given
+    assert rows == sorted(rows, key=lambda r: r["score"], reverse=True)
+    assert any(r["name"] == "lead_lag_1d" for r in rows)
+    # causal: gap-fade signal uses only past (prev close) -> no NaN leakage to +1/-1
+    assert sig.isin([-1, 0, 1]).all()
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

@@ -47,7 +47,8 @@ pip install -r requirements.txt        # numpy + pandas
 python examples/run_all.py             # full end-to-end demo (synthetic)
 python examples/compare_strategies.py  # backtest all strategies on REAL data
 python examples/find_edges.py          # hunt daily inefficiencies + walk-forward tuning
-python tests/test_framework.py         # 15 correctness tests
+python examples/repeatable_edges.py    # rank patterns by year-to-year repeatability
+python tests/test_framework.py         # 24 correctness tests
 ```
 
 ### Finding daily edges & optimising

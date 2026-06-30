@@ -121,6 +121,40 @@ neatly into a single daily cron run.
 
 ---
 
+## 4b. Repeatability lab — is the edge *consistent*, not just profitable?
+
+"A pattern that always works" doesn't exist in liquid markets (it would be
+arbitraged away). What you can find is an edge that **recurs**. `qflow/edge_lab.py`
+scores any daily pattern on four axes and ranks a battery of candidates:
+
+| Axis | Question | Metric |
+|------|----------|--------|
+| Significance | Is it luck? | t-stat / p (with a Bonferroni bar for multiple testing) |
+| **Consistency** | Does it repeat **every year**? | share of calendar years positive |
+| Persistence | Does it hold **out-of-sample**? | Sharpe in the 1st vs 2nd half of history |
+| Tradeable | Survives costs? | net Sharpe > 0 |
+
+```bash
+python examples/repeatable_edges.py
+```
+```
+REPEATABLE-EDGE SCAN — TSLA (leader AAPL)
+pattern          Sharpe     t       p  consist  OOS1  OOS2 trades  verdict
+gap_fade           0.77  1.33   0.185     75%  0.78  0.76    408   robust
+lead_lag_1d        0.75  1.30   0.193     50%  1.06  0.00    215   weak
+gap_follow        -1.49 -2.59   0.009     25% -1.53 -1.47    408   no edge
+```
+
+Read it like this: **gap_fade** is the only "robust" one — positive in 75% of
+years and stable in *both* halves of history. (On AAPL, a **Monday** session
+edge is positive in 100% of years.) Note none beats the strict Bonferroni
+significance bar on this short sample — so they are **strong hypotheses to
+paper-test**, confirmed only with more data. `gap_follow` is reliably *negative*,
+which is itself information: it confirms fading (not chasing) gaps is correct.
+
+> Run it on 10y data (`feeds.get(sym, "yahoo", rng="10y")`) for statistics you
+> can actually trust — 2–4 years is too few calendar years to judge consistency.
+
 ## 5. Forward-testing the edges (now built into the paper engine)
 
 Both edges are wired into the paper-trading engine as **intraday** strategies
