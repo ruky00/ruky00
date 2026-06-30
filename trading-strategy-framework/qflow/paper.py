@@ -103,7 +103,8 @@ class PaperTrader:
                  leader_symbol: str = "",
                  leader_source: str = "",
                  news_provider=None,
-                 risk_limits: dict | None = None):
+                 risk_limits: dict | None = None,
+                 broker=None):
         if strategy not in ALL_STRATEGIES:
             raise ValueError(f"Unknown strategy {strategy!r}. "
                              f"Choose from {sorted(ALL_STRATEGIES)}.")
@@ -118,6 +119,8 @@ class PaperTrader:
         self._news_mult = 1.0                  # transient: applied only in step()
         self._news_reason = ""
         self.governor = None                   # set after state is ready
+        self.broker = broker                   # optional real execution
+        self._live = False                     # True only inside step(); never in replay
         self.dir = os.path.join(root, f"{symbol}_{strategy}")
         os.makedirs(self.dir, exist_ok=True)
         self.state_path = os.path.join(self.dir, "state.json")
@@ -286,6 +289,8 @@ class PaperTrader:
                 reason = "entry" + (f" (news x{self._news_mult:g})"
                                     if self._news_mult < 1.0 else "")
                 self._log(date, "OPEN", side, entry, shares, reason, 0.0, c)
+                self._route_to_broker(date, direction, shares, entry, p.stop,
+                                      p.target, c)
 
         # 3) record equity + advance the clock
         if self.governor:
@@ -371,6 +376,24 @@ class PaperTrader:
         except Exception as e:
             return {"enabled": True, "error": f"{type(e).__name__}"}
 
+    def _route_to_broker(self, date, direction, shares, entry, stop, target, mark):
+        """Send a real bracket order — only on the LIVE step path, swing trades.
+        Replay never reaches here (self._live stays False)."""
+        if self.broker is None or not self._live:
+            return
+        side = "BUY" if direction == 1 else "SELL"
+        qty = max(1, int(round(shares)))           # whole shares for equities
+        try:
+            if not self.broker.is_connected():
+                self.broker.connect()
+            res = self.broker.place_bracket(self.symbol, qty=qty, side=side,
+                                            entry=entry, stop=stop, target=target)
+            self._log(date, "BROKER", side, entry, qty,
+                      f"{self.broker.name} order {res.order_id} ({res.status})", 0.0, mark)
+        except Exception as e:
+            self._log(date, "BROKER_ERR", side, entry, 0,
+                      f"{type(e).__name__}: {e}", 0.0, mark)
+
     # ----------------------- public API ------------------------ #
     def step(self) -> dict:
         """Process the single latest bar (idempotent). Use this in a daily cron."""
@@ -383,10 +406,16 @@ class PaperTrader:
             return {"status": "no-new-bar", "last_date": self.state.last_date}
         # consult live news for the direction the strategy wants this bar
         self._news_mult, self._news_reason = self._news_gate(int(sig.signal.iloc[i]))
-        self._process_bar(df, i, atr, sig)
-        self._news_mult, self._news_reason = 1.0, ""     # reset (no carry to replay)
+        news_note = self._news_reason or "n/a"
+        self._live = True                                # enable real broker routing
+        try:
+            self._process_bar(df, i, atr, sig)
+        finally:
+            self._live = False
+            self._news_mult, self._news_reason = 1.0, ""  # reset (no carry to replay)
         self._save()
-        return {"status": "stepped", "date": bar_date, "news": self._news_reason or "n/a",
+        return {"status": "stepped", "date": bar_date, "news": news_note,
+                "broker": self.broker.name if self.broker else "none",
                 "equity": self.state.equity_curve[-1]["equity"]}
 
     def replay(self, n: int = 30) -> dict:
@@ -485,6 +514,10 @@ class PaperTrader:
                          f"stop {p.stop:.2f} target {p.target:.2f}")
         else:
             lines.append("OPEN position      : flat")
+        if self.broker is not None:
+            conn = "connected" if self.broker.is_connected() else "not connected"
+            lines.append(f"Broker             : {self.broker.name} ({conn}) "
+                         "— real bracket orders on live --step")
         if self.governor:
             gs = self.governor.status()
             state = ("HALTED" if gs["halted"] else

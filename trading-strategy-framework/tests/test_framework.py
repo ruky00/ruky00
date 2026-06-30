@@ -340,6 +340,53 @@ def test_dual_listing_pair_and_scan():
     assert "results" in dl and "errors" in dl
 
 
+def test_broker_paper_and_ibkr_safety():
+    from qflow import broker
+    pb = broker.PaperBroker(); pb.connect()
+    r = pb.place_bracket("AAPL", qty=10, side="BUY", entry=100, stop=96, target=108)
+    assert r.status == "filled" and r.stop == 96 and r.target == 108
+    assert pb.positions()["AAPL"]["qty"] == 10
+    # live-port guard: cannot connect to a live port without allow_live
+    try:
+        broker.IBKRBroker(port=7496)
+        assert False, "live port should require allow_live"
+    except ValueError:
+        pass
+    # paper port allowed; connect fails clearly without ib_insync installed
+    try:
+        broker.IBKRBroker(port=7497).connect()
+    except RuntimeError as e:
+        assert "ib_insync" in str(e)
+
+
+def test_paper_engine_broker_routing_live_only():
+    import tempfile
+    from qflow import broker, indicators as ind
+
+    class CountBroker(broker.PaperBroker):
+        calls = 0
+        def place_bracket(self, *a, **k):
+            CountBroker.calls += 1
+            return super().place_bracket(*a, **k)
+
+    # replay must never place real orders
+    pt = PaperTrader("TSLA", "github", "trend_following",
+                     root=tempfile.mkdtemp(), broker=CountBroker())
+    pt.replay(400)
+    assert CountBroker.calls == 0
+
+    # the live path (as step() runs it) routes a bracket with the engine's SL/TP
+    pt2 = PaperTrader("TSLA", "github", "trend_following",
+                      root=tempfile.mkdtemp(), broker=broker.PaperBroker())
+    df = pt2._data(); atr = ind.atr(df, 14); sig = pt2._signal(df)
+    i = next(k for k in range(250, len(df)) if sig.signal.iloc[k] != 0)
+    pt2._live = True
+    pt2._process_bar(df, i, atr, sig)
+    assert any(j["action"] == "BROKER" for j in pt2.state.journal)
+    pos = pt2.broker.positions()["TSLA"]
+    assert pos["stop"] > 0 and pos["target"] > 0          # SL/TP placed at broker
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

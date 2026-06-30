@@ -16,6 +16,7 @@ montecarlo  : trade-bootstrap Monte-Carlo robustness analysis
 portfolio   : risk-based portfolio construction & allocation
 risk        : position sizing and risk/reward helpers
 risk_governor: portfolio kill-switches (daily loss, drawdown, heat, streak)
+broker      : execution adapters — PaperBroker + IBKRBroker (bracket orders)
 paper       : persistent paper-trading engine for forward testing
 optimize    : grid search + walk-forward (out-of-sample) parameter tuning
 anomalies   : daily-edge scanner (overnight, gaps, day-of-week, lead-lag)
@@ -44,6 +45,7 @@ from . import (  # noqa: F401
     portfolio,
     risk,
     risk_governor,
+    broker,
     paper,
     optimize,
     anomalies,

@@ -33,6 +33,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/dual_listing.py` | **España↔US lead-lag** — Santander/BBVA/Telefónica cross-listings |
 | `qflow/news.py` | **News + sentiment** — provider-agnostic (RSS/Finnhub/Bloomberg/FinBERT) trade overlay |
 | `qflow/risk_governor.py` | **Kill-switches** — daily-loss / drawdown / heat / streak circuit breakers |
+| `qflow/broker.py` | **Execution** — PaperBroker + IBKRBroker (native bracket orders) |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
 
 The full quant walkthrough — covering strategy generation, backtesting,
@@ -104,6 +105,22 @@ persists across daily runs. Details: **[`docs/RISK.md`](docs/RISK.md)**.
 python examples/paper_trade.py --symbol TSLA --kill-switches --max-drawdown 0.08 --step
 ```
 
+### Live execution (Interactive Brokers)
+
+A broker layer turns signals into real orders. `IBKRBroker` submits **native
+bracket orders** — every entry carries a stop-loss and take-profit that live on
+IBKR's servers (honoured even if your script dies). Defaults to the **paper
+port**; live ports require `allow_live=True`. Backtests never send orders. Full
+guide: **[`docs/BROKER.md`](docs/BROKER.md)**.
+
+```python
+from qflow.paper import PaperTrader
+from qflow import broker
+pt = PaperTrader("AAPL", source="yahoo", strategy="mean_reversion",
+                 risk_limits={"max_drawdown": 0.08}, broker=broker.IBKRBroker(port=7497))
+pt.step()    # the only path that places real orders
+```
+
 ### Minimal example
 
 ```python
@@ -154,9 +171,9 @@ ordinary machine.
 trading-strategy-framework/
 ├── qflow/            # the framework package (data, feeds, strategies, backtest, paper, ...)
 ├── examples/         # run_all · compare_strategies · find_edges · news_demo · paper_trade
-├── tests/            # test_framework.py — 23 correctness checks
+├── tests/            # test_framework.py — 28 correctness checks
 ├── data/samples/     # bundled REAL sample datasets (AAPL, TSLA)
-├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · PAPER_TRADING · DISCLAIMER
+├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · BROKER · PAPER_TRADING · DISCLAIMER
 ├── requirements.txt
 └── LICENSE           # MIT
 ```
