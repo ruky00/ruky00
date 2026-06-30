@@ -99,7 +99,8 @@ class PaperTrader:
                  root: str = DEFAULT_ROOT,
                  feed_kwargs: dict | None = None,
                  leader_symbol: str = "",
-                 leader_source: str = ""):
+                 leader_source: str = "",
+                 news_provider=None):
         if strategy not in ALL_STRATEGIES:
             raise ValueError(f"Unknown strategy {strategy!r}. "
                              f"Choose from {sorted(ALL_STRATEGIES)}.")
@@ -110,6 +111,9 @@ class PaperTrader:
         self.source = source
         self.strategy = strategy
         self.feed_kwargs = feed_kwargs or {}
+        self.news_provider = news_provider     # optional live news overlay
+        self._news_mult = 1.0                  # transient: applied only in step()
+        self._news_reason = ""
         self.dir = os.path.join(root, f"{symbol}_{strategy}")
         os.makedirs(self.dir, exist_ok=True)
         self.state_path = os.path.join(self.dir, "state.json")
@@ -218,23 +222,30 @@ class PaperTrader:
         p = Position(**self.state.position)
         if not p.is_open and target_sig != 0 and atr > 0:
             direction = target_sig
-            entry = c * (1 + fee * direction)          # EOD fill at close
-            stop_dist = self.state.stop_atr * atr
-            equity_now = self._equity(c)
-            risk_amt = equity_now * self.state.risk_per_trade
-            shares = risk_amt / stop_dist
-            shares = min(shares, equity_now / entry)   # no leverage
-            risk_amt = shares * stop_dist
-            p = Position(
-                direction=direction, shares=shares, entry=entry,
-                stop=entry - direction * stop_dist,
-                target=entry + direction * self.state.target_atr * atr,
-                risk_amt=risk_amt,
-                entry_date=str(date.date() if hasattr(date, "date") else date),
-            )
-            self.state.position = asdict(p)
-            side = "LONG" if direction == 1 else "SHORT"
-            self._log(date, "OPEN", side, entry, shares, "entry", 0.0, c)
+            if self._news_mult <= 0.0:                 # live news veto
+                self._log(date, "SKIP", "LONG" if direction == 1 else "SHORT",
+                          c, 0, f"news_veto: {self._news_reason}", 0.0, c)
+                target_sig = 0
+            else:
+                entry = c * (1 + fee * direction)          # EOD fill at close
+                stop_dist = self.state.stop_atr * atr
+                equity_now = self._equity(c)
+                risk_amt = equity_now * self.state.risk_per_trade
+                shares = risk_amt / stop_dist
+                shares = min(shares, equity_now / entry) * self._news_mult  # news sizing
+                risk_amt = shares * stop_dist
+                p = Position(
+                    direction=direction, shares=shares, entry=entry,
+                    stop=entry - direction * stop_dist,
+                    target=entry + direction * self.state.target_atr * atr,
+                    risk_amt=risk_amt,
+                    entry_date=str(date.date() if hasattr(date, "date") else date),
+                )
+                self.state.position = asdict(p)
+                side = "LONG" if direction == 1 else "SHORT"
+                reason = "entry" + (f" (news x{self._news_mult:g})"
+                                    if self._news_mult < 1.0 else "")
+                self._log(date, "OPEN", side, entry, shares, reason, 0.0, c)
 
         # 3) record equity + advance the clock
         self.state.equity_curve.append({
@@ -257,23 +268,52 @@ class PaperTrader:
         fee = self.state.fee
         dstr = str(date.date() if hasattr(date, "date") else date)
 
-        if target_sig != 0 and atr > 0 and o > 0:
+        if target_sig != 0 and atr > 0 and o > 0 and self._news_mult <= 0.0:
+            self._log(date, "SKIP", "LONG" if target_sig == 1 else "SHORT",
+                      o, 0, f"news_veto: {self._news_reason}", 0.0, o)
+        elif target_sig != 0 and atr > 0 and o > 0:
             direction = target_sig
             entry = o * (1 + fee * direction)
             stop_dist = self.state.stop_atr * atr            # sizing proxy only
             equity_now = self.state.balance
             risk_amt = equity_now * self.state.risk_per_trade
-            shares = min(risk_amt / stop_dist, equity_now / entry)
+            shares = min(risk_amt / stop_dist, equity_now / entry) * self._news_mult
             exit_fill = c * (1 - fee * direction)
             pnl = direction * (exit_fill - entry) * shares
             side = "LONG" if direction == 1 else "SHORT"
-            self._log(date, "OPEN", side, entry, shares, "open", 0.0, o)
+            reason = "open" + (f" (news x{self._news_mult:g})" if self._news_mult < 1.0 else "")
+            self._log(date, "OPEN", side, entry, shares, reason, 0.0, o)
             self.state.balance += pnl
             self._log(date, "CLOSE", "-", exit_fill, 0, "close", pnl, c)
 
         # always flat overnight; record equity = realised balance
         self.state.equity_curve.append({"date": dstr, "equity": round(self.state.balance, 2)})
         self.state.last_date = dstr
+
+    # ----------------------- news overlay ---------------------- #
+    def _news_gate(self, direction: int) -> tuple[float, str]:
+        """Live news risk overlay for a proposed trade (size multiplier, reason).
+        Only consulted in step(); never during historical replay."""
+        if not self.news_provider or direction == 0:
+            return 1.0, ""
+        try:
+            from . import news
+            items = self.news_provider.fetch(self.symbol, limit=20)
+            ov = news.news_overlay(items, direction)
+            return ov["size_multiplier"], ov["reason"]
+        except Exception as e:
+            return 1.0, f"news unavailable ({type(e).__name__})"
+
+    def news_status(self) -> dict:
+        """Current news tone for the symbol (live; requires a provider)."""
+        if not self.news_provider:
+            return {"enabled": False}
+        try:
+            from . import news
+            items = self.news_provider.fetch(self.symbol, limit=20)
+            return {"enabled": True, **news.summarise(items)}
+        except Exception as e:
+            return {"enabled": True, "error": f"{type(e).__name__}"}
 
     # ----------------------- public API ------------------------ #
     def step(self) -> dict:
@@ -285,9 +325,12 @@ class PaperTrader:
         bar_date = str(df.index[i].date() if hasattr(df.index[i], "date") else df.index[i])
         if bar_date == self.state.last_date:
             return {"status": "no-new-bar", "last_date": self.state.last_date}
+        # consult live news for the direction the strategy wants this bar
+        self._news_mult, self._news_reason = self._news_gate(int(sig.signal.iloc[i]))
         self._process_bar(df, i, atr, sig)
+        self._news_mult, self._news_reason = 1.0, ""     # reset (no carry to replay)
         self._save()
-        return {"status": "stepped", "date": bar_date,
+        return {"status": "stepped", "date": bar_date, "news": self._news_reason or "n/a",
                 "equity": self.state.equity_curve[-1]["equity"]}
 
     def replay(self, n: int = 30) -> dict:
@@ -386,6 +429,14 @@ class PaperTrader:
                          f"stop {p.stop:.2f} target {p.target:.2f}")
         else:
             lines.append("OPEN position      : flat")
+        if self.news_provider:
+            ns = self.news_status()
+            if ns.get("enabled") and "error" not in ns:
+                lines.append(f"News overlay       : {ns.get('tone','?')}  "
+                             f"(avg {ns.get('avg_sentiment',0):+.2f}, "
+                             f"{ns.get('n',0)} items, {ns.get('n_events',0)} events)")
+            else:
+                lines.append(f"News overlay       : enabled ({ns.get('error','no data')})")
         r = self.readiness()
         lines.append("-" * 60)
         lines.append(f"Readiness: {r['passed']}/{r['total']} gates")

@@ -28,6 +28,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/portfolio.py` | Inverse-vol allocation + risk-tolerance overlay |
 | `qflow/optimize.py` | Grid search + **walk-forward** (out-of-sample) tuning |
 | `qflow/anomalies.py` | **Daily-edge scanner** — overnight, gaps, day-of-week, lead-lag |
+| `qflow/news.py` | **News + sentiment** — provider-agnostic (RSS/Finnhub/Bloomberg) trade overlay |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
 
 The full quant walkthrough — covering strategy generation, backtesting,
@@ -73,6 +74,18 @@ python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --step --
 
 It journals every fill, tracks the equity curve, and prints a **go-live
 readiness gate**. Full plan: **[`docs/PAPER_TRADING.md`](docs/PAPER_TRADING.md)**.
+
+### News-aware trading (optional)
+
+A provider-agnostic news + sentiment layer can veto or down-size trades that
+fight fresh adverse headlines. Free RSS by default; Bloomberg is one optional
+adapter (only worth it if you already pay for a Terminal — see the honest
+cost analysis in **[`docs/NEWS.md`](docs/NEWS.md)**).
+
+```bash
+python examples/news_demo.py                                   # offline demo
+python examples/paper_trade.py --symbol AAPL --news rss --step # live overlay
+```
 
 ### Minimal example
 
@@ -123,10 +136,10 @@ ordinary machine.
 ```
 trading-strategy-framework/
 ├── qflow/            # the framework package (data, feeds, strategies, backtest, paper, ...)
-├── examples/         # run_all · compare_strategies · find_edges · paper_trade
-├── tests/            # test_framework.py — 15 correctness checks
+├── examples/         # run_all · compare_strategies · find_edges · news_demo · paper_trade
+├── tests/            # test_framework.py — 20 correctness checks
 ├── data/samples/     # bundled REAL sample datasets (AAPL, TSLA)
-├── docs/             # PLAYBOOK · EDGES · PAPER_TRADING · DISCLAIMER
+├── docs/             # PLAYBOOK · EDGES · NEWS · PAPER_TRADING · DISCLAIMER
 ├── requirements.txt
 └── LICENSE           # MIT
 ```

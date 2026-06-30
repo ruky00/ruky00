@@ -212,6 +212,39 @@ def test_paper_lead_lag_requires_leader():
     assert out["bars"] > 0 and pt.live_metrics()["closed_trades"] > 0
 
 
+def test_news_sentiment_and_overlay():
+    from qflow import news
+    # scorer: polarity + negation + events
+    assert news.score_sentiment("profit surges, beats estimates")[0] > 0.3
+    assert news.score_sentiment("plunges on fraud probe, guidance cut")[0] < -0.3
+    assert news.score_sentiment("shares not weak, demand strong")[0] > 0    # negation
+    assert news.score_sentiment("steady ahead of Fed decision")[1] is True  # event
+    items = news.SampleProvider().fetch("AAPL")   # positive tone
+    assert news.news_overlay(items, -1)["action"] == "veto"      # fights a short
+    assert news.news_overlay(items, 1)["size_multiplier"] == 1.0  # ok for a long
+
+
+def test_news_veto_blocks_entry_and_replay_isolated():
+    import tempfile
+    from qflow import news
+    # replay must be identical with or without a provider (overlay is live-only)
+    a = PaperTrader("TSLA", "github", "gap_fade", root=tempfile.mkdtemp())
+    b = PaperTrader("TSLA", "github", "gap_fade", root=tempfile.mkdtemp(),
+                    news_provider=news.SampleProvider())
+    a.replay(400); b.replay(400)
+    assert a.live_metrics()["closed_trades"] == b.live_metrics()["closed_trades"]
+
+    # forcing a veto multiplier blocks a swing entry and logs a SKIP
+    pt = PaperTrader("AAPL", "github", "trend_following", root=tempfile.mkdtemp())
+    df = pt._data(); atr = ind.atr(df, 14); sig = pt._signal(df)
+    # find a bar where the strategy wants a position
+    idx = next(i for i in range(250, len(df)) if sig.signal.iloc[i] != 0)
+    pt._news_mult, pt._news_reason = 0.0, "test veto"
+    pt._process_bar(df, idx, atr, sig)
+    assert pt.state.position["direction"] == 0          # entry vetoed
+    assert any(j["action"] == "SKIP" for j in pt.state.journal)
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

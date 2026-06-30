@@ -40,6 +40,9 @@ def main():
                     help="for lead_lag: the asset that moves first (e.g. SAN.MC)")
     ap.add_argument("--leader-source", default="",
                     help="data source for the leader (defaults to --source)")
+    ap.add_argument("--news", default="none",
+                    choices=["none", "sample", "rss", "finnhub", "newsapi"],
+                    help="live news overlay applied at --step (not in replay)")
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--risk", type=float, default=0.01)
     ap.add_argument("--step", action="store_true", help="process the latest bar")
@@ -53,10 +56,20 @@ def main():
     if args.interval:
         feed_kwargs["interval"] = args.interval
 
+    news_provider = None
+    if args.news != "none":
+        from qflow import news as newsmod
+        news_provider = {
+            "sample": newsmod.SampleProvider,
+            "rss": newsmod.RSSProvider,
+            "finnhub": newsmod.FinnhubProvider,
+            "newsapi": newsmod.NewsAPIProvider,
+        }[args.news]()
+
     kw = dict(symbol=args.symbol, source=args.source, strategy=args.strategy,
               capital=args.capital, risk_per_trade=args.risk,
               feed_kwargs=feed_kwargs, leader_symbol=args.leader_symbol,
-              leader_source=args.leader_source)
+              leader_source=args.leader_source, news_provider=news_provider)
 
     if args.reset:
         PaperTrader(**kw).reset()
