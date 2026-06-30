@@ -25,18 +25,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import warnings
 warnings.filterwarnings("ignore")
 
-from qflow.paper import PaperTrader
-from qflow import strategies
+from qflow.paper import PaperTrader, ALL_STRATEGIES
 
 
 def main():
     ap = argparse.ArgumentParser(description="qflow paper trading")
     ap.add_argument("--strategy", default="mean_reversion",
-                    choices=list(strategies.REGISTRY))
+                    choices=sorted(ALL_STRATEGIES))
     ap.add_argument("--symbol", default="AAPL")
     ap.add_argument("--source", default="github",
                     choices=["github", "binance", "stooq", "yahoo"])
     ap.add_argument("--interval", default=None, help="e.g. 1d, 1h (binance/yahoo)")
+    ap.add_argument("--leader-symbol", default="",
+                    help="for lead_lag: the asset that moves first (e.g. SAN.MC)")
+    ap.add_argument("--leader-source", default="",
+                    help="data source for the leader (defaults to --source)")
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--risk", type=float, default=0.01)
     ap.add_argument("--step", action="store_true", help="process the latest bar")
@@ -50,17 +53,15 @@ def main():
     if args.interval:
         feed_kwargs["interval"] = args.interval
 
-    pt = PaperTrader(
-        symbol=args.symbol, source=args.source, strategy=args.strategy,
-        capital=args.capital, risk_per_trade=args.risk, feed_kwargs=feed_kwargs,
-    )
+    kw = dict(symbol=args.symbol, source=args.source, strategy=args.strategy,
+              capital=args.capital, risk_per_trade=args.risk,
+              feed_kwargs=feed_kwargs, leader_symbol=args.leader_symbol,
+              leader_source=args.leader_source)
 
     if args.reset:
-        pt.reset()
-        pt = PaperTrader(symbol=args.symbol, source=args.source,
-                         strategy=args.strategy, capital=args.capital,
-                         risk_per_trade=args.risk, feed_kwargs=feed_kwargs)
+        PaperTrader(**kw).reset()
         print("State reset.")
+    pt = PaperTrader(**kw)
 
     if args.replay:
         print(pt.replay(args.replay))

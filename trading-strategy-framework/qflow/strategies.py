@@ -29,6 +29,7 @@ class StrategySignal:
     signal: pd.Series
     atr: pd.Series
     params: dict
+    execution: str = "swing"   # "swing" (multi-day, ATR stops) or "intraday" (open->close)
 
 
 # --------------------------------------------------------------------------- #

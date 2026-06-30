@@ -175,6 +175,43 @@ def test_grid_search_ranks():
     assert res["score"].is_monotonic_decreasing
 
 
+def test_daily_strategies_signals():
+    from qflow import daily
+    df = data.synthetic_ohlcv(600, seed=8)
+    gf = daily.gap_fade(df)
+    assert gf.execution == "intraday"
+    assert gf.signal.isin([-1, 0, 1]).all()
+    ll = daily.lead_lag(df, data.synthetic_ohlcv(600, seed=9))
+    assert ll.execution == "intraday" and ll.signal.isin([-1, 0, 1]).all()
+
+
+def test_paper_intraday_gap_fade():
+    import tempfile
+    pt = PaperTrader(symbol="TSLA", source="github", strategy="gap_fade",
+                     root=tempfile.mkdtemp())
+    out = pt.replay(400)
+    assert out["bars"] > 0
+    m = pt.live_metrics()
+    assert m["closed_trades"] > 0 and m["equity"] > 0
+    # intraday book is flat overnight -> never holds a position between days
+    assert not pt.state.position["direction"]
+    assert pt.replay(400)["bars"] == 0          # idempotent
+
+
+def test_paper_lead_lag_requires_leader():
+    import tempfile
+    root = tempfile.mkdtemp()
+    try:
+        PaperTrader(symbol="TSLA", source="github", strategy="lead_lag", root=root)
+        assert False, "should have required a leader_symbol"
+    except ValueError:
+        pass
+    pt = PaperTrader(symbol="TSLA", source="github", strategy="lead_lag",
+                     leader_symbol="AAPL", root=root)
+    out = pt.replay(756)
+    assert out["bars"] > 0 and pt.live_metrics()["closed_trades"] > 0
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

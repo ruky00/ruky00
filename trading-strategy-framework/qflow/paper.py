@@ -36,7 +36,12 @@ from dataclasses import dataclass, field, asdict
 import numpy as np
 import pandas as pd
 
-from . import feeds, strategies, indicators as ind, metrics
+from . import feeds, strategies, daily, indicators as ind, metrics
+
+# every strategy the paper engine can run, across execution styles
+ALL_STRATEGIES = (set(strategies.REGISTRY)
+                  | set(daily.INTRADAY_REGISTRY)
+                  | set(daily.LEADER_STRATEGIES))
 
 DEFAULT_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "paper"
@@ -71,6 +76,9 @@ class State:
     fee: float
     balance: float                       # realised account value
     last_date: str = ""                  # last bar date processed (idempotency)
+    execution: str = "swing"             # "swing" or "intraday"
+    leader_symbol: str = ""              # for lead-lag strategies
+    leader_source: str = ""
     position: dict = field(default_factory=lambda: asdict(Position()))
     journal: list = field(default_factory=list)
     equity_curve: list = field(default_factory=list)   # [{date, equity}]
@@ -89,10 +97,15 @@ class PaperTrader:
                  commission_bps: float = 2.0,
                  slippage_bps: float = 2.0,
                  root: str = DEFAULT_ROOT,
-                 feed_kwargs: dict | None = None):
-        if strategy not in strategies.REGISTRY:
+                 feed_kwargs: dict | None = None,
+                 leader_symbol: str = "",
+                 leader_source: str = ""):
+        if strategy not in ALL_STRATEGIES:
             raise ValueError(f"Unknown strategy {strategy!r}. "
-                             f"Choose from {list(strategies.REGISTRY)}.")
+                             f"Choose from {sorted(ALL_STRATEGIES)}.")
+        if strategy in daily.LEADER_STRATEGIES and not leader_symbol:
+            raise ValueError(f"Strategy {strategy!r} needs a leader_symbol "
+                             "(the asset that moves first).")
         self.symbol = symbol
         self.source = source
         self.strategy = strategy
@@ -111,6 +124,8 @@ class PaperTrader:
                 target_atr=target_atr,
                 fee=(commission_bps + slippage_bps) / 1e4,
                 balance=capital,
+                leader_symbol=leader_symbol,
+                leader_source=leader_source or source,
             )
             self._save()
 
@@ -135,9 +150,16 @@ class PaperTrader:
         return feeds.get(self.symbol, source=self.source, **self.feed_kwargs)
 
     def _signal(self, df: pd.DataFrame):
+        params = self.state.params or {}
+        if self.strategy in daily.LEADER_STRATEGIES:
+            leader = feeds.get(self.state.leader_symbol,
+                               source=self.state.leader_source or self.source,
+                               **self.feed_kwargs)
+            return daily.LEADER_STRATEGIES[self.strategy](df, leader, **params)
+        if self.strategy in daily.INTRADAY_REGISTRY:
+            return daily.INTRADAY_REGISTRY[self.strategy](df, **params)
         fn = strategies.REGISTRY[self.strategy]
-        sig = fn(df, **self.state.params) if self.state.params else fn(df)
-        return sig
+        return fn(df, **params) if params else fn(df)
 
     # ----------------------- core step ------------------------- #
     def _equity(self, mark_close: float) -> float:
@@ -157,6 +179,10 @@ class PaperTrader:
         })
 
     def _process_bar(self, df: pd.DataFrame, i: int, atr_series: pd.Series, sig) -> None:
+        self.state.execution = sig.execution
+        if sig.execution == "intraday":
+            return self._process_bar_intraday(df, i, atr_series, sig)
+
         date = df.index[i]
         o, h, l, c = (float(df["open"].iloc[i]), float(df["high"].iloc[i]),
                       float(df["low"].iloc[i]), float(df["close"].iloc[i]))
@@ -216,6 +242,38 @@ class PaperTrader:
             "equity": round(self._equity(c), 2),
         })
         self.state.last_date = str(date.date() if hasattr(date, "date") else date)
+
+    def _process_bar_intraday(self, df, i, atr_series, sig) -> None:
+        """
+        Intraday (open->close) execution: enter at the open on the signal, exit
+        at the close the same day, flat overnight. ATR is used only to size the
+        position to the 1%-risk budget; there is no overnight stop order.
+        """
+        date = df.index[i]
+        o = float(df["open"].iloc[i])
+        c = float(df["close"].iloc[i])
+        target_sig = int(sig.signal.iloc[i])
+        atr = float(atr_series.iloc[i]) if not np.isnan(atr_series.iloc[i]) else 0.0
+        fee = self.state.fee
+        dstr = str(date.date() if hasattr(date, "date") else date)
+
+        if target_sig != 0 and atr > 0 and o > 0:
+            direction = target_sig
+            entry = o * (1 + fee * direction)
+            stop_dist = self.state.stop_atr * atr            # sizing proxy only
+            equity_now = self.state.balance
+            risk_amt = equity_now * self.state.risk_per_trade
+            shares = min(risk_amt / stop_dist, equity_now / entry)
+            exit_fill = c * (1 - fee * direction)
+            pnl = direction * (exit_fill - entry) * shares
+            side = "LONG" if direction == 1 else "SHORT"
+            self._log(date, "OPEN", side, entry, shares, "open", 0.0, o)
+            self.state.balance += pnl
+            self._log(date, "CLOSE", "-", exit_fill, 0, "close", pnl, c)
+
+        # always flat overnight; record equity = realised balance
+        self.state.equity_curve.append({"date": dstr, "equity": round(self.state.balance, 2)})
+        self.state.last_date = dstr
 
     # ----------------------- public API ------------------------ #
     def step(self) -> dict:

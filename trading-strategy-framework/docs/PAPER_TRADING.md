@@ -50,6 +50,16 @@ python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --step
 python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --report
 ```
 
+The same workflow runs the **intraday edge strategies** (`gap_fade`, `lead_lag`)
+discovered in [`EDGES.md`](EDGES.md) — they enter at the open and exit at the
+close, flat overnight:
+
+```bash
+python examples/paper_trade.py --strategy gap_fade --symbol TSLA --step
+python examples/paper_trade.py --strategy lead_lag --symbol TSLA \
+    --leader-symbol AAPL --step          # trade TSLA off AAPL's prior move
+```
+
 Automate it with cron (weekdays at 17:30):
 
 ```cron

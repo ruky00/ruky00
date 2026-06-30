@@ -118,3 +118,36 @@ print(res.report())
 
 Gap-fade and lead-lag are **once-a-day, at-the-open** decisions, so they slot
 neatly into a single daily cron run.
+
+---
+
+## 5. Forward-testing the edges (now built into the paper engine)
+
+Both edges are wired into the paper-trading engine as **intraday** strategies
+(enter at the open, exit at the close, flat overnight). Forward-test them with
+virtual money exactly like the swing strategies:
+
+```bash
+# gap-fade on a volatile name
+python examples/paper_trade.py --strategy gap_fade --symbol TSLA --reset --replay 400
+
+# cross-market lead-lag: trade TSLA off AAPL's prior-day move
+python examples/paper_trade.py --strategy lead_lag --symbol TSLA \
+    --leader-symbol AAPL --reset --replay 756
+
+# your España -> US version (run on your own machine, open network):
+python examples/paper_trade.py --strategy lead_lag --symbol SAN \
+    --source yahoo --leader-symbol SAN.MC --leader-source yahoo --step
+```
+
+On the bundled samples this reproduces, in the paper account:
+
+| Strategy | Paper result | Readiness |
+|----------|--------------|-----------|
+| `gap_fade` on TSLA | +4.5%, Sharpe 0.72, 224 trades, win 57% | **5/5 → GO** |
+| `lead_lag` TSLA←AAPL | +4.4%, Sharpe 0.59, 215 trades, win 55% | **5/5 → GO** |
+
+Sizing still respects the 1%-risk rule (ATR-based), the journal/equity files are
+written as usual, and the same go-live readiness gate applies. For a live
+intraday workflow you'd run twice a day (enter near the open, exit near the
+close); on end-of-day daily bars a single run simulates the full round trip.
