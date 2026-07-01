@@ -73,7 +73,16 @@ def size(capital, risk, atr, stop_atr, price):
     return max(1, qty)
 
 
-def build_plan(symbols, default_name, default_interval, auto_select,
+def fetch_bars(broker, sym, interval, count=800, yahoo_rng="5d"):
+    """Get bars from the broker's own feed (e.g. MT5 = FundedNext data) if it has
+    one; otherwise fall back to Yahoo. Same data source as execution when possible."""
+    df = broker.bars(sym, interval, count)
+    if df is not None and len(df):
+        return df
+    return feeds.from_yahoo(sym, rng=yahoo_rng, interval=interval)
+
+
+def build_plan(broker, symbols, default_name, default_interval, auto_select,
                cache_path=None, reselect_hours=24.0):
     """
     Decide, per symbol, which (strategy, interval) to trade.
@@ -90,14 +99,15 @@ def build_plan(symbols, default_name, default_interval, auto_select,
         name, interval = default_name, default_interval
         if auto_select:
             try:
+                loader = lambda s=sym: fetch_bars(broker, s, "5m", count=8000,
+                                                  yahoo_rng="60d")
                 if cache_path:
                     choice = intraday_select.select_cached(
-                        sym, lambda s=sym: feeds.from_yahoo(s, rng="60d", interval="5m"),
-                        cache_path=cache_path, max_age_hours=reselect_hours, min_sharpe=0.0)
+                        sym, loader, cache_path=cache_path,
+                        max_age_hours=reselect_hours, min_sharpe=0.0)
                     tag = " (cached)" if (choice and choice.get("cached")) else ""
                 else:
-                    choice = intraday_select.select_best(
-                        feeds.from_yahoo(sym, rng="60d", interval="5m"), min_sharpe=0.0)
+                    choice = intraday_select.select_best(loader(), min_sharpe=0.0)
                     tag = ""
                 if choice:
                     name, interval = choice["strategy"], choice["interval"]
@@ -201,7 +211,7 @@ def main():
     print(f"🤖 INTRADAY BOT | {mode} | {args.broker}:{broker.account_label()} | {symbols}")
     if args.auto_select:
         print("   picking the best (strategy, interval) per symbol out-of-sample...")
-    plan = build_plan(symbols, args.strategy, args.interval, args.auto_select,
+    plan = build_plan(broker, symbols, args.strategy, args.interval, args.auto_select,
                       cache_path=args.select_cache or None,
                       reselect_hours=args.reselect_hours)
 
@@ -292,7 +302,7 @@ def main():
             for sym in symbols:
                 name, fn, interval = plan[sym]
                 try:
-                    df = feeds.from_yahoo(sym, rng="5d", interval=interval)
+                    df = fetch_bars(broker, sym, interval, count=800, yahoo_rng="5d")
                 except Exception as e:
                     rows.append(f"  {sym:<5} data error ({type(e).__name__})"); continue
                 if len(df) < 210:

@@ -79,6 +79,11 @@ class BrokerAdapter:
         """Short id for the header line (account number / broker name)."""
         return self.name
 
+    def bars(self, symbol: str, interval: str = "5m", count: int = 800):
+        """Return recent OHLCV bars for `symbol` from the broker's own feed, or
+        None if this broker has no data feed (caller then falls back to feeds.*)."""
+        return None
+
 
 # --------------------------------------------------------------------------- #
 # Paper broker — in-memory, no dependencies (default / testing)
@@ -537,6 +542,32 @@ class MT5Broker(BrokerAdapter):
 
     def account_label(self) -> str:
         return f"{self.login_id}@{self.server}" if self.login_id else "mt5"
+
+    # ----- market data (same feed as execution) ----- #
+    def bars(self, symbol: str, interval: str = "5m", count: int = 800):
+        """Recent OHLCV from MT5's own feed (FundedNext data) — no Yahoo needed."""
+        import pandas as pd
+        m = self._mt5
+        tf = {
+            "1m": m.TIMEFRAME_M1, "5m": m.TIMEFRAME_M5, "15m": m.TIMEFRAME_M15,
+            "30m": m.TIMEFRAME_M30, "1h": m.TIMEFRAME_H1, "4h": m.TIMEFRAME_H4,
+            "1d": m.TIMEFRAME_D1,
+        }.get(interval.lower())
+        if tf is None:
+            raise ValueError(f"unsupported MT5 interval {interval!r}")
+        if not (m.symbol_info(symbol) or (m.symbol_select(symbol, True) and None)):
+            pass                                    # ensure the symbol is in Market Watch
+        m.symbol_select(symbol, True)
+        rates = m.copy_rates_from_pos(symbol, tf, 0, count)
+        if rates is None or len(rates) == 0:
+            return None
+        df = pd.DataFrame(rates)
+        df.index = pd.to_datetime(df["time"], unit="s")
+        df.index.name = "date"
+        vol = df["real_volume"] if "real_volume" in df and df["real_volume"].any() \
+            else df.get("tick_volume", 0)
+        return pd.DataFrame({"open": df["open"], "high": df["high"], "low": df["low"],
+                             "close": df["close"], "volume": vol}, index=df.index)
 
     # ----- readback (real, two-way) ----- #
     def account(self) -> dict:

@@ -183,6 +183,8 @@ def test_mt5_broker_two_way_with_fake_terminal():
         ORDER_TYPE_BUY = 0; ORDER_TYPE_SELL = 1
         POSITION_TYPE_BUY = 0; POSITION_TYPE_SELL = 1
         ORDER_TIME_GTC = 0; ORDER_FILLING_IOC = 1; TRADE_RETCODE_DONE = 10009
+        TIMEFRAME_M1 = 1; TIMEFRAME_M5 = 5; TIMEFRAME_M15 = 15; TIMEFRAME_M30 = 30
+        TIMEFRAME_H1 = 60; TIMEFRAME_H4 = 240; TIMEFRAME_D1 = 1440
         def __init__(s): s.sent = []; s._pos = []
         def initialize(s, **k): return True
         def login(s, *a, **k): return True
@@ -196,6 +198,15 @@ def test_mt5_broker_two_way_with_fake_terminal():
             return SI()
         def symbol_select(s, sym, v): return True
         def symbol_info_tick(s, sym): return _T(1.1002, 1.1000)
+        def copy_rates_from_pos(s, sym, tf, start, count):
+            t = np.arange(count) * 300 + 1_700_000_000
+            dt = np.dtype([("time", "i8"), ("open", "f8"), ("high", "f8"),
+                           ("low", "f8"), ("close", "f8"), ("tick_volume", "i8"),
+                           ("spread", "i4"), ("real_volume", "i8")])
+            a = np.zeros(count, dtype=dt)
+            a["time"] = t; a["open"] = 1.1; a["close"] = 1.1001
+            a["high"] = 1.1003; a["low"] = 1.0997; a["tick_volume"] = 100
+            return a
         def order_send(s, req):
             s.sent.append(req)
             if req["action"] == s.TRADE_ACTION_DEAL and "position" not in req:
@@ -206,6 +217,11 @@ def test_mt5_broker_two_way_with_fake_terminal():
     b = brk.MT5Broker(login=123, server="FN", mt5=f)
     b.connect()
     assert b.account()["equity"] == 50_750.0            # real equity readback (two-way)
+    # bars come from MT5's own feed (FundedNext data), not Yahoo
+    df = b.bars("EURUSD", "5m", 300)
+    assert list(df.columns) == ["open", "high", "low", "close", "volume"]
+    assert len(df) == 300 and str(df.index.dtype).startswith("datetime64")
+    assert (df["volume"] == 100).all()
     r = b.place_bracket("EURUSD", 0.10, "BUY", entry=1.10, stop=1.095, target=1.11)
     assert r.status == "filled"
     assert f.sent[-1]["sl"] == 1.095 and f.sent[-1]["tp"] == 1.11 and f.sent[-1]["volume"] == 0.10

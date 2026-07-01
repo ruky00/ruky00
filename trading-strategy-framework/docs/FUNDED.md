@@ -118,6 +118,12 @@ the exam status line, greedy-but-capped sizing and the pass/fail auto-flatten al
 work against your live FundedNext balance. `SL`/`TP` are attached to each order
 and enforced by the broker.
 
+**Data comes from MT5 too — no Yahoo.** When `--broker mt5`, the bot reads bars
+straight from the MT5 terminal's feed (`MT5Broker.bars` → `copy_rates_from_pos`),
+i.e. the **same FundedNext price data it trades on**. Yahoo is only a fallback for
+brokers with no data feed (e.g. the webhook). So one MT5 connection gives the bot
+everything: prices in, strategy applied, orders out — exactly as you described.
+
 > TradeLocker / Match-Trader (FundedNext's other platforms) don't have a Python
 > API; reach those through the `WebhookBroker` + a bridge (below).
 
