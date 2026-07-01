@@ -73,10 +73,24 @@ def main():
           f"stop {stop}, target {target}")
     res = ib.place_bracket(args.symbol, qty=args.qty, side="BUY",
                            entry=price, stop=stop, target=target, entry_type="MKT")
-    print(f"submitted parent order id {res.order_id}.")
-    print("Look in IB Gateway (or Client Portal): you should see the entry fill "
-          "plus a resting STOP and LIMIT (take-profit).")
-    print("Clean up when done:  python examples/ibkr_test_order.py --flatten")
+    print(f"submitted parent order id {res.order_id}. waiting for acknowledgement ...")
+    ib.ib.sleep(3)                       # give IBKR time to register before we read/disconnect
+
+    # confirm from the same session
+    trades = ib.ib.openTrades()
+    print(f"\nLIVE ORDERS now ({len(trades)}):")
+    for t in trades:
+        o, st = t.order, t.orderStatus
+        print(f"  #{o.orderId:<4} {o.action:<4} {o.totalQuantity:>4g} {t.contract.symbol:<6}"
+              f" {o.orderType:<5} @ {o.lmtPrice or o.auxPrice or 'MKT'}  [{st.status}]")
+    if not trades:
+        print("  (none — likely rejected because the market is CLOSED. MKT orders "
+              "need the market open. Try a Spanish stock while Madrid is open, or "
+              "wait for the US open at 15:30 Spain time.)")
+    pos = ib.ib.positions()
+    if pos:
+        print("POSITIONS:", {p.contract.symbol: p.position for p in pos})
+    print("\nClean up when done:  python examples/ibkr_test_order.py --flatten")
     ib.disconnect()
 
 
