@@ -238,6 +238,7 @@ class IBKRBroker(BrokerAdapter):
                   else LimitOrder(action, qty, entry))
         parent.transmit = False
         parent.outsideRth = self.outside_rth
+        parent.tif = self.tif        # match the account preset (else 10349 cancels it)
         # exit-leg TIF (default GTC so a swing stop/target survive overnight). If
         # the account preset forces DAY, GTC triggers error 10349 + cancellation —
         # pass tif="DAY" to match the preset (see IBKRBroker docstring).
@@ -270,7 +271,10 @@ class IBKRBroker(BrokerAdapter):
         from ib_insync import MarketOrder
         contract = self._contract(symbol)
         self.ib.qualifyContracts(contract)
-        trade = self.ib.placeOrder(contract, MarketOrder(side.upper(), qty))
+        order = MarketOrder(side.upper(), qty)
+        order.tif = self.tif                 # match account preset (avoid 10349)
+        order.outsideRth = self.outside_rth
+        trade = self.ib.placeOrder(contract, order)
         return BracketResult(order_id=str(trade.order.orderId), symbol=symbol,
                              side=side.upper(), qty=qty, entry=price, stop=0.0,
                              target=0.0, status="submitted", broker=self.name)
