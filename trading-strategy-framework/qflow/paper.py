@@ -123,6 +123,7 @@ class PaperTrader:
         self.broker = broker                   # optional real execution
         self.broker_symbol = broker_symbol or symbol   # IBKR ticker (may differ from data)
         self._live = False                     # True only inside step(); never in replay
+        self._external_block = False           # set by a portfolio runner to veto new entries
         self.dir = os.path.join(root, f"{symbol}_{strategy}")
         os.makedirs(self.dir, exist_ok=True)
         self.state_path = os.path.join(self.dir, "state.json")
@@ -257,7 +258,11 @@ class PaperTrader:
         p = Position(**self.state.position)
         if not p.is_open and target_sig != 0 and atr > 0:
             direction = target_sig
-            if self._news_mult <= 0.0:                 # live news veto
+            if self._external_block:                   # portfolio correlation veto
+                self._log(date, "SKIP", "LONG" if direction == 1 else "SHORT",
+                          c, 0, "correlation_block", 0.0, c)
+                target_sig = 0
+            elif self._news_mult <= 0.0:               # live news veto
                 self._log(date, "SKIP", "LONG" if direction == 1 else "SHORT",
                           c, 0, f"news_veto: {self._news_reason}", 0.0, c)
                 target_sig = 0
@@ -325,7 +330,10 @@ class PaperTrader:
         gov_ok, gov_why = (self.governor.can_open(risk_amt, self.state.balance)
                            if (self.governor and tradeable) else (True, ""))
 
-        if tradeable and self._news_mult <= 0.0:
+        if tradeable and self._external_block:
+            self._log(date, "SKIP", "LONG" if target_sig == 1 else "SHORT",
+                      o, 0, "correlation_block", 0.0, o)
+        elif tradeable and self._news_mult <= 0.0:
             self._log(date, "SKIP", "LONG" if target_sig == 1 else "SHORT",
                       o, 0, f"news_veto: {self._news_reason}", 0.0, o)
         elif tradeable and not gov_ok:

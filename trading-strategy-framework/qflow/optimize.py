@@ -232,6 +232,23 @@ def rolling_walk_forward(df: pd.DataFrame,
     }
 
 
+def walk_forward_params(df: pd.DataFrame,
+                        strategy_name: str,
+                        param_grid: dict,
+                        train_years: int = 4,
+                        metric: str = "sharpe_calmar",
+                        min_trades: int = 3,
+                        bt_kwargs: dict | None = None) -> dict:
+    """Return {test_year: best_params} from a rolling walk-forward — the params
+    to use for each calendar year, re-optimised on that year's trailing window."""
+    wf = rolling_walk_forward(df, strategy_name, param_grid, train_years=train_years,
+                              test_years=1, metric=metric, min_trades=min_trades,
+                              bt_kwargs=bt_kwargs)
+    if "error" in wf:
+        return {}
+    return {f["test_year"]: f["params"] for f in wf["folds"]}
+
+
 def report_rolling(wf: dict) -> str:
     if "error" in wf:
         return f"rolling walk-forward: {wf['error']}"

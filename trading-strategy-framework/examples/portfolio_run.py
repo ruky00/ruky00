@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--max-drawdown", type=float, default=0.15)
     ap.add_argument("--max-heat", type=float, default=0.06)
     ap.add_argument("--portfolio-max-drawdown", type=float, default=0.15)
+    ap.add_argument("--max-correlation", type=float, default=0.85,
+                    help="block a new entry if it correlates above this with an open name")
     # news
     ap.add_argument("--news", default="none",
                     choices=["none", "sample", "rss", "finnhub", "newsapi"])
@@ -105,7 +107,8 @@ def main():
         allocation=args.allocation, broker=broker_obj, news_provider=news_provider,
         risk_limits=risk_limits, feed_kwargs=feed_kwargs,
         currency=args.currency, exchange=args.exchange, primary=args.primary,
-        portfolio_max_drawdown=args.portfolio_max_drawdown, reset=args.reset,
+        portfolio_max_drawdown=args.portfolio_max_drawdown,
+        max_correlation=args.max_correlation, reset=args.reset,
     )
 
     if args.replay:

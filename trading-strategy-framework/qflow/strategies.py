@@ -229,6 +229,67 @@ def adaptive(df: pd.DataFrame, atr_window: int = 14, allow_short: bool = True) -
     return sig
 
 
+# Default parameter grids for the walk-forward-optimised adaptive strategy.
+DEFAULT_WF_GRIDS = {
+    "trend_following": {"fast": [20, 50], "slow": [100, 200], "adx_threshold": [15, 20, 25]},
+    "mean_reversion": {"rsi_buy": [5, 10, 15], "rsi_exit": [55, 65], "pct_b_buy": [0.02, 0.05]},
+    "volatility_breakout": {"channel": [40, 55], "exit_channel": [10, 20],
+                            "squeeze_lookback": [15, 25]},
+}
+
+
+def _yearly_optimized_signal(df, name, grid, train_years, bt_kwargs):
+    """Signal for one sub-strategy where each calendar year uses the params that
+    a rolling walk-forward re-optimised on that year's trailing window."""
+    from . import optimize
+    fn = REGISTRY[name]
+    pmap = optimize.walk_forward_params(df, name, grid, train_years=train_years,
+                                        bt_kwargs=bt_kwargs)
+    sig = fn(df).signal.copy()                     # default for uncovered years
+    for year, params in pmap.items():
+        yearly = fn(df, **params).signal
+        mask = df.index.year == year
+        sig[mask] = yearly[mask]
+    return sig
+
+
+def adaptive_walk_forward(df: pd.DataFrame,
+                          grids: dict | None = None,
+                          train_years: int = 4,
+                          atr_window: int = 14,
+                          bt_kwargs: dict | None = None) -> StrategySignal:
+    """
+    Like ``adaptive`` (regime picks the sub-strategy per bar), but each
+    sub-strategy uses **per-year walk-forward-optimised parameters** instead of
+    fixed defaults — so the bot re-tunes each strategy every year automatically.
+    Slower (runs grid search per fold); best for daily use / backtests.
+    """
+    from . import regime
+    grids = grids or DEFAULT_WF_GRIDS
+    bt_kwargs = bt_kwargs or {"capital": 10_000.0, "risk_per_trade": 0.01}
+    tf = _yearly_optimized_signal(df, "trend_following", grids["trend_following"],
+                                  train_years, bt_kwargs).values
+    mr = _yearly_optimized_signal(df, "mean_reversion", grids["mean_reversion"],
+                                  train_years, bt_kwargs).values
+    vb = _yearly_optimized_signal(df, "volatility_breakout", grids["volatility_breakout"],
+                                  train_years, bt_kwargs).values
+    atr = ind.atr(df, atr_window)
+    reg = regime.detect(df)
+    trend, vol = reg["trend"].values, reg["volatility"].values
+    out, chosen = [], []
+    for i in range(len(df)):
+        if trend[i] in ("bull", "bear"):
+            out.append(int(tf[i])); chosen.append("trend_following")
+        elif vol[i] == "high":
+            out.append(int(vb[i])); chosen.append("volatility_breakout")
+        else:
+            out.append(int(mr[i])); chosen.append("mean_reversion")
+    sig = StrategySignal(signal=pd.Series(out, index=df.index), atr=atr,
+                         params=dict(mode="adaptive_wf", train_years=train_years))
+    sig.chosen = pd.Series(chosen, index=df.index)
+    return sig
+
+
 def adaptive_status(df: pd.DataFrame) -> dict:
     """What the adaptive strategy is doing on the LATEST bar (for live display)."""
     from . import regime
@@ -247,4 +308,5 @@ REGISTRY = {
     "mean_reversion": mean_reversion,
     "volatility_breakout": volatility_breakout,
     "auto": adaptive,
+    "auto_wf": adaptive_walk_forward,   # auto + per-year walk-forward-optimised params
 }

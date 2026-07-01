@@ -44,6 +44,7 @@ class PortfolioRunner:
                  exchange: str = "SMART",
                  primary: str = "",
                  portfolio_max_drawdown: float = 0.15,
+                 max_correlation: float = 0.85,
                  root: str = DEFAULT_ROOT,
                  name: str = "portfolio",
                  reset: bool = False):
@@ -52,6 +53,7 @@ class PortfolioRunner:
         self.symbols = symbols
         self.broker = broker
         self.portfolio_max_drawdown = portfolio_max_drawdown
+        self.max_correlation = max_correlation      # block new entries in correlated names
         self.dir = os.path.join(root, name)
         os.makedirs(self.dir, exist_ok=True)
         self.state_path = os.path.join(self.dir, "portfolio.json")
@@ -77,7 +79,36 @@ class PortfolioRunner:
             broker.currency, broker.exchange = currency, exchange
             broker.primary_exchange = primary
 
+        self._corr = self._correlation(symbols, source, feed_kwargs or {})
+
     # ----------------------- allocation ----------------------- #
+    @staticmethod
+    def _correlation(symbols, source, feed_kwargs):
+        """Pairwise daily-return correlation across the basket (None if unavailable)."""
+        if len(symbols) < 2:
+            return None
+        closes = {}
+        for s in symbols:
+            try:
+                closes[s] = feeds.get(s, source=source, **feed_kwargs)["close"]
+            except Exception:
+                pass
+        if len(closes) < 2:
+            return None
+        rets = pd.DataFrame(closes).pct_change().dropna()
+        return rets.corr() if len(rets) > 20 else None
+
+    def _correlated_with_open(self, sym, open_syms) -> str | None:
+        """Return the name of an open, highly-correlated symbol, else None."""
+        if self._corr is None or self.max_correlation is None or sym not in self._corr:
+            return None
+        for o in open_syms:
+            if o == sym or o not in self._corr.columns:
+                continue
+            if abs(self._corr.loc[sym, o]) >= self.max_correlation:
+                return o
+        return None
+
     @staticmethod
     def _weights(symbols, source, allocation, feed_kwargs) -> dict:
         if allocation == "inverse_vol":
@@ -141,17 +172,31 @@ class PortfolioRunner:
         if self.broker is not None and not self.broker.is_connected():
             self.broker.connect()
 
+    def _open_symbols(self) -> set:
+        return {s for s, t in self.traders.items()
+                if t.state.position.get("direction", 0) != 0}
+
     def step_all(self) -> list[dict]:
         ok, why = self._portfolio_guard()
         if not ok:
             return [{"status": "portfolio-halted", "reason": why}]
         self.connect_broker()
+        open_syms = self._open_symbols()          # correlation is checked vs open names
         results = []
         for sym, t in self.traders.items():
+            # block a NEW entry if this name is highly correlated with an open one
+            corr_with = self._correlated_with_open(sym, open_syms)
+            t._external_block = corr_with is not None and sym not in open_syms
             try:
                 res = t.step()
+                if t._external_block:
+                    res = {**res, "note": f"entry blocked (corr>{self.max_correlation} with {corr_with})"}
             except Exception as e:
                 res = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+            finally:
+                t._external_block = False
+            if t.state.position.get("direction", 0) != 0:
+                open_syms.add(sym)                # a fresh position blocks later correlated names
             results.append({"symbol": sym, **res})
         self._portfolio_guard()   # refresh peak/halt after stepping
         return results

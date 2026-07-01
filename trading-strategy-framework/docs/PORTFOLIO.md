@@ -47,6 +47,12 @@ python examples/portfolio_run.py --symbols TSLA,NVDA,AMD,COIN,PLTR --source yaho
   daily bar. `report()` shows each symbol's active strategy + a portfolio total.
 - **Two circuit breakers**: per-symbol (`--kill-switches`) and portfolio-wide
   (`--portfolio-max-drawdown`, latches a halt on total-equity drawdown).
+- **Correlation filter** (`--max-correlation`, default 0.85): blocks a new entry
+  in a name that is highly correlated with a position you already hold, so you
+  don't stack the same bet under different tickers (e.g. two semis).
+- **Strategy choice**: `--strategy auto` (regime picks per bar, fixed params) or
+  `--strategy auto_wf` (same, but each sub-strategy uses per-year walk-forward-
+  optimised params — heavier, re-tunes yearly).
 
 Spanish names (data on Yahoo `.MC`, order on Madrid in EUR) work too — pass
 `--currency EUR --primary BM` and a `--symbols` list of `.MC` tickers.

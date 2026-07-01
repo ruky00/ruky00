@@ -456,6 +456,29 @@ def test_portfolio_runner_multi_symbol():
     assert isinstance(pr.report(), str) and "PORTFOLIO" in pr.report()
 
 
+def test_portfolio_correlation_filter():
+    import tempfile
+    from qflow.portfolio_runner import PortfolioRunner
+    from qflow import broker
+    pr = PortfolioRunner(["NVDA", "AMD", "AMZN"], strategy="trend_following",
+                         source="github", total_capital=9_000,
+                         broker=broker.PaperBroker(), max_correlation=0.3,
+                         root=tempfile.mkdtemp(), reset=True)
+    assert pr._corr is not None and pr._corr.shape == (3, 3)
+    # a name correlated above threshold with an open one is flagged; a low-corr one isn't
+    assert pr._correlated_with_open("NVDA", {"AMD"}) == "AMD"     # corr ~0.36 > 0.3
+    assert pr._correlated_with_open("AMZN", {"AMD"}) is None      # corr ~0.16 < 0.3
+    # the block flag routes through PaperTrader as a SKIP (no crash, no open)
+    t = pr.traders["NVDA"]
+    t._external_block = True
+    import qflow.indicators as ind
+    df = t._data(); atr = ind.atr(df, 14); sig = t._signal(df)
+    idx = next((i for i in range(250, len(df)) if sig.signal.iloc[i] != 0), None)
+    if idx is not None:
+        t._process_bar(df, idx, atr, sig)
+        assert t.state.position["direction"] == 0
+
+
 def test_portfolio_drawdown_halt():
     import tempfile
     from qflow.portfolio_runner import PortfolioRunner
