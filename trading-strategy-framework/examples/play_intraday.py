@@ -57,6 +57,16 @@ def main():
     ap.add_argument("--minutes", type=int, default=0, help="0 = until Ctrl+C")
     args = ap.parse_args()
 
+    if sys.version_info[:2] >= (3, 13):
+        print("=" * 70)
+        print(f"⚠️  Python {sys.version_info.major}.{sys.version_info.minor} detected. "
+              "ib_insync does NOT reliably process fills/positions on 3.13+,")
+        print("   so orders may show '✗ not filled' and P&L stays 0 even if they")
+        print("   execute at IBKR. Use a Python 3.12 venv:")
+        print("     py -3.12 -m venv .venv && .venv\\Scripts\\activate")
+        print("     pip install -r requirements.txt ib_insync")
+        print("=" * 70)
+
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     broker = brk.IBKRBroker(port=args.port, client_id=args.client_id, tif="DAY")  # DAY avoids 10349
     broker.connect()
