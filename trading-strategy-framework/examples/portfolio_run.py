@@ -125,7 +125,14 @@ def main():
                 stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for r in runner.step_all():
                     print(f"[{stamp}] {r}")
-                time.sleep(max(30, args.loop_interval))
+                # ib.sleep pumps the IBKR event loop so the connection survives
+                # the wait (plain time.sleep starves it -> timeouts)
+                w = max(30, args.loop_interval)
+                b = runner.broker
+                if b is not None and getattr(b, "name", "") == "ibkr" and b.is_connected():
+                    b.ib.sleep(w)
+                else:
+                    time.sleep(w)
         except KeyboardInterrupt:
             print("\nStopped by user.")
     elif args.step:

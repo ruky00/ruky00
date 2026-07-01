@@ -92,23 +92,31 @@ def main():
                 # act only on a NEW bar, only when flat
                 new_bar = last_bar.get(sym) != ts
                 action = ""
-                if new_bar and not held and atr > 0:
-                    if rsi < args.rsi_buy:
-                        q = size(args.capital, args.risk, atr, args.stop_atr, price)
-                        broker.place_bracket(sym, q, "BUY", entry=price,
-                                             stop=price - args.stop_atr * atr,
-                                             target=price + args.target_atr * atr)
-                        action = f"🟢 BUY {q}"
-                    elif args.allow_short and rsi > args.rsi_sell:
-                        q = size(args.capital, args.risk, atr, args.stop_atr, price)
-                        broker.place_bracket(sym, q, "SELL", entry=price,
-                                             stop=price + args.stop_atr * atr,
-                                             target=price - args.target_atr * atr)
-                        action = f"🔴 SHORT {q}"
+                try:
+                    if new_bar and not held and atr > 0:
+                        if rsi < args.rsi_buy:
+                            q = size(args.capital, args.risk, atr, args.stop_atr, price)
+                            broker.place_bracket(sym, q, "BUY", entry=price,
+                                                 stop=price - args.stop_atr * atr,
+                                                 target=price + args.target_atr * atr)
+                            action = f"🟢 BUY {q}"
+                        elif args.allow_short and rsi > args.rsi_sell:
+                            q = size(args.capital, args.risk, atr, args.stop_atr, price)
+                            broker.place_bracket(sym, q, "SELL", entry=price,
+                                                 stop=price + args.stop_atr * atr,
+                                                 target=price - args.target_atr * atr)
+                            action = f"🔴 SHORT {q}"
+                    if action:
+                        broker.ib.sleep(1)      # let the order register
+                except Exception as e:
+                    action = f"⚠️ order error ({type(e).__name__})"
                 last_bar[sym] = ts
                 rows.append(f"  {sym:<5} {price:>8.2f}  RSI {rsi:>5.1f}  {tag:<4} {action}")
 
-            eq = broker.account().get("equity", "?")
+            try:
+                eq = broker.account().get("equity", "?")
+            except Exception:
+                eq = "?"
             stamp = datetime.now().strftime("%H:%M:%S")
             print(f"[{stamp}] equity {eq}  positions {len(positions)}")
             print("\n".join(rows) + "\n")
@@ -117,7 +125,15 @@ def main():
                 print("⏰ time's up — flattening everything.")
                 broker.cancel_all(); broker.flatten()
                 break
-            time.sleep(max(15, args.poll))
+            # IMPORTANT: ib.sleep() pumps the ib_insync event loop so the IBKR
+            # connection stays alive during the wait (a plain time.sleep starves
+            # it and causes timeouts). Falls back to time.sleep if disconnected.
+            wait = max(15, args.poll)
+            if broker.is_connected():
+                broker.ib.sleep(wait)
+            else:
+                broker.connect()
+                time.sleep(5)
     except KeyboardInterrupt:
         print("\n👋 stopped. Open positions/brackets remain at IBKR — "
               "run  python examples/ibkr_test_order.py --flatten  to clear them.")

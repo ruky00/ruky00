@@ -140,7 +140,13 @@ def main():
                     print(f"[{stamp}] {pt.step()}")
                 except Exception as e:      # never let one bad tick kill the loop
                     print(f"[{stamp}] step error: {type(e).__name__}: {e}")
-                time.sleep(max(30, args.loop_interval))
+                # ib.sleep keeps the IBKR connection alive during the wait
+                w = max(30, args.loop_interval)
+                if pt.broker is not None and getattr(pt.broker, "name", "") == "ibkr" \
+                        and pt.broker.is_connected():
+                    pt.broker.ib.sleep(w)
+                else:
+                    time.sleep(w)
         except KeyboardInterrupt:
             print("\nStopped by user.")
     elif args.step:
