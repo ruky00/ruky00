@@ -32,6 +32,12 @@ Run (Python 3.12 venv, IB Gateway paper open on 4002):
     python bot/intraday_bot.py --auto-select --funded --allow-short \
         --profit-target 0.08 --max-daily-loss 0.05 --max-total-drawdown 0.10
 
+    # FundedNext via MetaTrader 5 (two-way: real fills/positions/equity back).
+    # Volume is in LOTS, so pass --fixed-qty; run the MT5 terminal logged in first:
+    python bot/intraday_bot.py --broker mt5 --mt5-login 123456 --mt5-password ... \
+        --mt5-server FundedNext-Server --fundednext stellar_2step_p1 \
+        --symbols EURUSD,XAUUSD --fixed-qty 0.10 --journal logs/fn.csv
+
     # route to a Lucid (futures) demo via a TradersPost/CrossTrade webhook,
     # fixed 1 contract, dry-run first to inspect the payloads without sending:
     python bot/intraday_bot.py --broker webhook --webhook-url https://... \
@@ -55,7 +61,7 @@ warnings.filterwarnings("ignore")
 
 from qflow import feeds, strategies, intraday_select, broker as brk
 from qflow.risk_governor import RiskGovernor
-from qflow.funded import FundedAccount, LUCID_PRESETS
+from qflow.funded import FundedAccount, LUCID_PRESETS, FUNDEDNEXT_PRESETS
 from qflow.journal import TradeJournal
 
 
@@ -113,16 +119,20 @@ def main():
                     help="strategy to trade (ignored per-symbol when --auto-select)")
     ap.add_argument("--symbols", default="NVDA,AMD,TSLA,AAPL,MSFT")
     ap.add_argument("--interval", default="5m", help="bar size (5m, 15m, 30m, 1h)")
-    ap.add_argument("--broker", default="ibkr", choices=["ibkr", "webhook", "paper"],
-                    help="execution venue: ibkr (stocks) · webhook (Lucid via "
-                         "TradersPost/CrossTrade) · paper (offline sim)")
+    ap.add_argument("--broker", default="ibkr", choices=["ibkr", "mt5", "webhook", "paper"],
+                    help="execution venue: ibkr (stocks) · mt5 (FundedNext, two-way) · "
+                         "webhook (Lucid via TradersPost) · paper (offline sim)")
     ap.add_argument("--webhook-url", default="",
                     help="webhook URL for --broker webhook (from TradersPost/CrossTrade)")
     ap.add_argument("--webhook-dry-run", action="store_true",
                     help="build the webhook payloads but don't POST (safe test)")
-    ap.add_argument("--fixed-qty", type=int, default=0,
-                    help="send a fixed quantity (e.g. futures contracts) instead of "
-                         "the ATR/equity share sizer")
+    ap.add_argument("--mt5-login", type=int, default=0, help="MT5 account number (FundedNext)")
+    ap.add_argument("--mt5-password", default="", help="MT5 account password")
+    ap.add_argument("--mt5-server", default="", help="MT5 server (e.g. FundedNext-Server)")
+    ap.add_argument("--mt5-path", default="", help="path to terminal64.exe (optional)")
+    ap.add_argument("--fixed-qty", type=float, default=0.0,
+                    help="send a fixed quantity instead of the ATR/equity share sizer "
+                         "(futures contracts or MT5 lots, e.g. 1 or 0.10)")
     ap.add_argument("--auto-select", action="store_true",
                     help="self-pick the best (strategy, interval) per symbol via "
                          "intraday walk-forward at startup (autonomous mode)")
@@ -151,6 +161,9 @@ def main():
     ap.add_argument("--lucid", type=int, choices=sorted(LUCID_PRESETS),
                     help="use a Lucid Trading preset (account size 25/50/100/150): "
                          "sets target, EOD trailing drawdown and 50%% consistency")
+    ap.add_argument("--fundednext", choices=sorted(FUNDEDNEXT_PRESETS),
+                    help="use a FundedNext preset (stellar_1step / stellar_2step_p1 / "
+                         "stellar_2step_p2 / express): sets target + daily/overall DD + min days")
     ap.add_argument("--profit-target", type=float, default=0.08)
     ap.add_argument("--max-total-drawdown", type=float, default=0.10)
     ap.add_argument("--drawdown-mode", choices=["static", "trailing", "eod"],
@@ -173,6 +186,9 @@ def main():
     if args.broker == "webhook":
         broker = brk.WebhookBroker(args.webhook_url, capital=args.capital,
                                    dry_run=args.webhook_dry_run)
+    elif args.broker == "mt5":
+        broker = brk.MT5Broker(login=args.mt5_login, password=args.mt5_password,
+                               server=args.mt5_server, path=args.mt5_path)
     elif args.broker == "paper":
         broker = brk.PaperBroker(cash=args.capital)
     else:
@@ -199,7 +215,16 @@ def main():
         print(f"   📓 journaling entries/exits to {args.journal}")
 
     fund = None
-    if args.lucid:
+    if args.fundednext:
+        fund = FundedAccount.from_fundednext(args.fundednext, consistency=args.consistency,
+                                             base_risk=args.base_risk)
+        fund.set_anchor(start_equity)
+        R = fund.rules
+        print(f"   💰 FUNDEDNEXT {args.fundednext} | target +{R['profit_target']*100:.0f}% | "
+              f"daily-loss {R['max_daily_loss']*100:.0f}% | overall-DD {R['max_total_drawdown']*100:.0f}% | "
+              f"min-days {R['min_trading_days']} | base risk {R['base_risk']*100:.2f}% "
+              f"(greedy, cushion-scaled)")
+    elif args.lucid:
         fund = FundedAccount.from_lucid(args.lucid, consistency=args.consistency,
                                         base_risk=args.base_risk)
         fund.set_anchor(start_equity)     # trade the real account balance if it differs

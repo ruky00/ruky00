@@ -63,7 +63,7 @@ python bot/intraday_bot.py --auto-select --funded --allow-short \
 | `qflow/funded.py` | **Funded-exam engine** — profit target + daily-loss / drawdown limits with greedy-but-capped dynamic sizing |
 | `qflow/intraday_select.py` | **Autonomous picker** — walk-forwards the intraday strategies across intervals, keeps the best OOS (+ cache) |
 | `qflow/journal.py` | **Trade journal** — append-only CSV of entries/exits → live win-rate / expectancy |
-| `qflow/broker.py` | **Execution** — PaperBroker · IBKRBroker (native brackets) · WebhookBroker (Lucid via TradersPost) |
+| `qflow/broker.py` | **Execution** — PaperBroker · IBKRBroker (stocks) · MT5Broker (FundedNext, two-way) · WebhookBroker (Lucid via TradersPost) |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
 | `qflow/portfolio_runner.py` | **Basket runner** — one strategy across many symbols, shared IBKR session |
 | `qflow/portfolio_selector.py` | **Auto universe filter** — keep only robust (symbol, strategy) pairs by walk-forward |
@@ -89,7 +89,7 @@ python examples/research/walk_forward.py        # rolling calendar walk-forward 
 python examples/research/select_portfolio.py    # auto-filter a basket to robust (symbol, strategy) pairs
 python examples/research/backtest_intraday.py   # daily strategies on 5m bars (they lose to costs)
 python examples/research/intraday_lab.py        # intraday strategies: pick the interval + walk-forward
-python tests/test_framework.py         # 49 correctness tests
+python tests/test_framework.py         # 51 correctness tests
 ```
 
 ### Finding daily edges & optimising
@@ -234,7 +234,7 @@ trading-strategy-framework/
 ├── examples/
 │   ├── research/        # backtest · walk-forward · edge-finding · universe selection (the lab)
 │   └── live/            # daily-swing paper/portfolio runners + IBKR utilities
-├── tests/               # test_framework.py — 49 correctness checks
+├── tests/               # test_framework.py — 51 correctness checks
 ├── data/samples/        # bundled REAL data (AAPL, TSLA, NVDA, AMD, NFLX, AMZN, MSFT, GOOGL)
 ├── docs/                # ROADMAP · FUNDED · PLAYBOOK · EDGES · PORTFOLIO · RISK · BROKER · SETUP_IBKR · PAPER_TRADING · NEWS · DISCLAIMER
 ├── requirements.txt

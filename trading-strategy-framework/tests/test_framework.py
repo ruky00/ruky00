@@ -167,6 +167,68 @@ def test_webhook_broker_routes_and_shadow_tracks():
         brk.WebhookBroker._post = orig
 
 
+def test_mt5_broker_two_way_with_fake_terminal():
+    from qflow import broker as brk
+
+    class _T:                       # tick
+        def __init__(s, a, b): s.ask, s.bid = a, b
+    class _P:                       # position
+        def __init__(s, sym, vol, typ, po): s.symbol, s.volume, s.type, s.price_open, s.ticket = sym, vol, typ, po, 1
+    class _R:                       # order_send result
+        def __init__(s, rc, o): s.retcode, s.order = rc, o
+    class _Info:
+        balance = 50_000.0; equity = 50_750.0; currency = "USD"
+    class FakeMT5:
+        TRADE_ACTION_DEAL = 1; TRADE_ACTION_REMOVE = 2
+        ORDER_TYPE_BUY = 0; ORDER_TYPE_SELL = 1
+        POSITION_TYPE_BUY = 0; POSITION_TYPE_SELL = 1
+        ORDER_TIME_GTC = 0; ORDER_FILLING_IOC = 1; TRADE_RETCODE_DONE = 10009
+        def __init__(s): s.sent = []; s._pos = []
+        def initialize(s, **k): return True
+        def login(s, *a, **k): return True
+        def shutdown(s): pass
+        def last_error(s): return (0, "ok")
+        def account_info(s): return _Info()
+        def positions_get(s): return list(s._pos)
+        def orders_get(s): return []
+        def symbol_info(s, sym):
+            class SI: visible = True
+            return SI()
+        def symbol_select(s, sym, v): return True
+        def symbol_info_tick(s, sym): return _T(1.1002, 1.1000)
+        def order_send(s, req):
+            s.sent.append(req)
+            if req["action"] == s.TRADE_ACTION_DEAL and "position" not in req:
+                s._pos.append(_P(req["symbol"], req["volume"], s.POSITION_TYPE_BUY, req["price"]))
+            return _R(s.TRADE_RETCODE_DONE, 999)
+
+    f = FakeMT5()
+    b = brk.MT5Broker(login=123, server="FN", mt5=f)
+    b.connect()
+    assert b.account()["equity"] == 50_750.0            # real equity readback (two-way)
+    r = b.place_bracket("EURUSD", 0.10, "BUY", entry=1.10, stop=1.095, target=1.11)
+    assert r.status == "filled"
+    assert f.sent[-1]["sl"] == 1.095 and f.sent[-1]["tp"] == 1.11 and f.sent[-1]["volume"] == 0.10
+    assert b.positions()["EURUSD"]["qty"] == 0.10       # position read back
+    b.flatten()
+    assert f.sent[-1]["action"] == f.TRADE_ACTION_DEAL and "position" in f.sent[-1]  # closed by ticket
+
+
+def test_funded_fundednext_presets():
+    from qflow.funded import FundedAccount
+    fa = FundedAccount.from_fundednext("stellar_1step")
+    assert fa.rules["profit_target"] == 0.10 and fa.rules["max_daily_loss"] == 0.03
+    assert fa.rules["max_total_drawdown"] == 0.06 and fa.rules["min_trading_days"] == 2
+    assert fa.rules["drawdown_mode"] == "static"
+    fb = FundedAccount.from_fundednext("express")
+    assert fb.rules["profit_target"] == 0.25 and fb.rules["min_trading_days"] == 10
+    try:
+        FundedAccount.from_fundednext("nope")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
 def test_funded_lucid_preset_and_eod_trailing():
     from qflow.funded import FundedAccount, LUCID_PRESETS
     fa = FundedAccount.from_lucid(50)

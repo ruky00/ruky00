@@ -5,8 +5,11 @@
 The bot can run itself against a prop-firm challenge: it self-selects a strategy
 per symbol, sizes trades to press toward the profit target while there's cushion,
 and de-risks *before* it can breach a loss limit. This doc explains the engine
-(`qflow/funded.py`), the Lucid Trading preset, the per-trade journal, the
-selection cache, and the concrete steps to connect to a real Lucid account.
+(`qflow/funded.py`), the **FundedNext** (MT5, two-way) and **Lucid** (futures,
+webhook) presets and connectors, the per-trade journal, and the selection cache.
+
+**Which firm?** FundedNext (CFD/Forex on MT5) is the recommended path — MT5 gives
+a real two-way API. Lucid (futures) is reachable one-way via a webhook bridge.
 
 ## The engine (`qflow/funded.py`)
 
@@ -75,6 +78,48 @@ python bot/intraday_bot.py --auto-select --lucid 50 --allow-short \
 
 The live status line shows: `profit +X%/6% · day-loss X% · DD-floor $48,000 ·
 cushion day/total X%/X% · days N/1 · ⚠️ consistency` (if the best-day rule is at risk).
+
+## FundedNext preset + MetaTrader 5 (the recommended path)
+
+FundedNext is a **CFD/Forex** firm on **MT4 / MT5 / cTrader** — and MT5 has an
+official Python package, so this is a **two-way** connection: the bot places
+orders *and* reads real positions / balance / equity back (unlike the one-way
+webhook). `FundedAccount.from_fundednext(model)` sets the rules:
+
+| Model | Profit target | Daily loss | Overall DD (static) | Min days |
+|---|---|---|---|---|
+| `stellar_1step` | 10% | 3% | 6% | 2 |
+| `stellar_2step_p1` (phase 1) | 8% | 5% | 10% | 5 |
+| `stellar_2step_p2` (phase 2) | 5% | 5% | 10% | 5 |
+| `express` | 25% | 5% | 10% | 10 |
+
+Overall drawdown is **static** (from the initial balance); the daily loss resets
+each day. No consistency rule by default. Confirm your model's exact target on the
+FundedNext dashboard and override with `--profit-target` if needed.
+
+### Connect via MetaTrader 5 (`MT5Broker`, `--broker mt5`)
+
+1. `pip install MetaTrader5` (Windows; on Linux/Mac run MT5 under Wine).
+2. Install the **MT5 terminal**, log into your FundedNext account, and enable
+   **Algo Trading** (the terminal must stay open while the bot runs).
+3. Trade FundedNext broker symbols (`EURUSD`, `XAUUSD`, `US30`, …). MT5 volume is
+   in **lots**, so pass `--fixed-qty` (e.g. `0.10`) — the equity/ATR share-sizer
+   doesn't apply to lots.
+
+```bash
+python bot/intraday_bot.py --broker mt5 \
+    --mt5-login 123456 --mt5-password "***" --mt5-server FundedNext-Server \
+    --fundednext stellar_2step_p1 --auto-select \
+    --symbols EURUSD,XAUUSD --fixed-qty 0.10 --journal logs/fn.csv
+```
+
+Because MT5 reports equity back, the funded engine tracks the **real** account:
+the exam status line, greedy-but-capped sizing and the pass/fail auto-flatten all
+work against your live FundedNext balance. `SL`/`TP` are attached to each order
+and enforced by the broker.
+
+> TradeLocker / Match-Trader (FundedNext's other platforms) don't have a Python
+> API; reach those through the `WebhookBroker` + a bridge (below).
 
 ## Per-trade journal (`qflow/journal.py`)
 

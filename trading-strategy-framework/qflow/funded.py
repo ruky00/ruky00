@@ -63,6 +63,17 @@ LUCID_PRESETS = {
     150: {"balance": 150_000, "profit_target": 9_000, "max_total_drawdown": 4_500, "max_daily_loss": 2_700},
 }
 
+# FundedNext presets (CFD/Forex on MT4/MT5/cTrader). Percentage-based, static
+# overall drawdown (from initial balance), daily loss from the day's start, no
+# consistency rule by default, unlimited time. Confirm the exact target for your
+# chosen model on the FundedNext dashboard and override if needed. See docs/FUNDED.md.
+FUNDEDNEXT_PRESETS = {
+    "stellar_1step":    {"profit_target": 0.10, "max_daily_loss": 0.03, "max_total_drawdown": 0.06, "min_days": 2},
+    "stellar_2step_p1": {"profit_target": 0.08, "max_daily_loss": 0.05, "max_total_drawdown": 0.10, "min_days": 5},
+    "stellar_2step_p2": {"profit_target": 0.05, "max_daily_loss": 0.05, "max_total_drawdown": 0.10, "min_days": 5},
+    "express":          {"profit_target": 0.25, "max_daily_loss": 0.05, "max_total_drawdown": 0.10, "min_days": 10},
+}
+
 
 @dataclass
 class FundedState:
@@ -110,6 +121,24 @@ class FundedAccount:
             "min_trading_days": 1,
         }
         return cls({**rules, **overrides}, start_equity=bal)
+
+    @classmethod
+    def from_fundednext(cls, model: str = "stellar_2step_p1", consistency: float = 1.0,
+                        start_equity: float | None = None, **overrides):
+        """Build a FundedAccount from a FundedNext model (percentage-based rules)."""
+        key = model.lower()
+        if key not in FUNDEDNEXT_PRESETS:
+            raise ValueError(f"FundedNext model {model!r} not in {sorted(FUNDEDNEXT_PRESETS)}")
+        p = FUNDEDNEXT_PRESETS[key]
+        rules = {
+            "profit_target": p["profit_target"],
+            "max_daily_loss": p["max_daily_loss"],
+            "max_total_drawdown": p["max_total_drawdown"],
+            "drawdown_mode": "static",           # FundedNext overall DD is static from balance
+            "consistency_pct": consistency,      # no consistency rule by default
+            "min_trading_days": p["min_days"],
+        }
+        return cls({**rules, **overrides}, start_equity=start_equity)
 
     # ----- setup ----- #
     def set_anchor(self, equity: float) -> None:

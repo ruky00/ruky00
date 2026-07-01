@@ -37,7 +37,7 @@ and purpose.
   intraday momentum, and the `intraday_auto` combiner) with per-strategy
   parameter grids, an interval sweep (5m/15m/30m via `data.resample_ohlcv`) and
   intraday walk-forward (`examples/research/intraday_lab.py`).
-- 49 passing tests.
+- 51 passing tests.
 
 **The Funded Bot (product 2)**
 - `bot/intraday_bot.py`: runs qflow strategies on 5-minute bars, ATR SL/TP
@@ -93,12 +93,13 @@ and purpose.
    intraday (symbol, strategy, interval) shortlist (`qflow/intraday_select.py`,
    `--auto-select`). *Next:* cache the selection to disk + re-select on a
    schedule instead of every startup.
-8. **Futures broker for Lucid**: Lucid is a *futures* prop firm (Tradovate /
-   Rithmic / CQG — not IBKR). ✅ **Webhook connector built** (`WebhookBroker`,
-   `--broker webhook`) to route orders to Lucid via TradersPost/CrossTrade —
-   one-way for now. *Next:* a two-way `TradovateBroker` (REST + WebSocket) for
-   real fills/equity back and **contract sizing** by tick value; then Alpaca /
-   ccxt for equities / crypto. See [`FUNDED.md`](FUNDED.md).
+8. **Prop-firm connectors**: ✅ **FundedNext via MetaTrader 5** (`MT5Broker`,
+   `--broker mt5`, `--fundednext ...`) — two-way (real fills/positions/equity),
+   the recommended path. ✅ **Lucid via webhook** (`WebhookBroker`,
+   `--broker webhook`) — one-way through TradersPost/CrossTrade. *Next:* proper
+   lot/contract sizing by instrument tick value (replace the equity share-sizer),
+   a two-way Tradovate adapter for Lucid, and Alpaca / ccxt for equities / crypto.
+   See [`FUNDED.md`](FUNDED.md).
 
 **Longer term — edge & scale**
 9. Smarter execution (limit/adaptive orders, VWAP entries) to cut slippage.

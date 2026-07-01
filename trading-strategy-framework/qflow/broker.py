@@ -468,3 +468,163 @@ class WebhookBroker(BrokerAdapter):
         for s in syms:
             self._post({"ticker": s, "action": "exit"})
             self._positions.pop(s, None)
+
+
+# --------------------------------------------------------------------------- #
+# MetaTrader 5 broker — two-way connector for FundedNext (and other MT5 firms)
+# --------------------------------------------------------------------------- #
+class MT5Broker(BrokerAdapter):
+    """
+    MetaTrader 5 adapter — the native, **two-way** path to a FundedNext (or any
+    MT5) account: it places orders *and* reads real positions / balance / equity
+    back, so the funded engine tracks the true account.
+
+    Requires the official package and a running MT5 terminal logged into the
+    challenge account:
+        pip install MetaTrader5          # Windows (or Wine); the terminal must be installed
+
+    Symbols are broker symbols (e.g. "EURUSD", "XAUUSD", "US30") and **volume is
+    in lots** (0.01 step), not shares — use --fixed-qty (e.g. 0.10) since the
+    equity/ATR share-sizer doesn't apply to lots. Stop-loss / take-profit are
+    attached to the market order and enforced by the broker.
+
+    Tests inject a fake `mt5` module; live code imports MetaTrader5 lazily.
+    """
+    name = "mt5"
+
+    def __init__(self, login: int = 0, password: str = "", server: str = "",
+                 path: str = "", magic: int = 555_000, deviation: int = 20, mt5=None):
+        self.login_id, self.password, self.server = login, password, server
+        self.path = path
+        self.magic, self.deviation = magic, deviation
+        self._mt5 = mt5           # optional injected module (tests)
+        self._connected = False
+
+    # ----- lifecycle ----- #
+    def connect(self):
+        m = self._mt5
+        if m is None:
+            try:
+                import MetaTrader5 as m           # noqa: N813
+            except ImportError as e:
+                raise RuntimeError(
+                    "MT5Broker needs the MetaTrader5 package and a running MT5 "
+                    "terminal:\n    pip install MetaTrader5\n"
+                    "Install MT5, log into your FundedNext account, then run again. "
+                    "(MetaTrader5 is Windows-only; on Linux/Mac run under Wine.)") from e
+        kw = {"path": self.path} if self.path else {}
+        if not m.initialize(**kw):
+            raise RuntimeError(f"MT5 initialize() failed: {m.last_error()}. Is the "
+                               "terminal open and 'Algo Trading' enabled?")
+        if self.login_id:
+            if not m.login(self.login_id, password=self.password, server=self.server):
+                raise RuntimeError(f"MT5 login failed for {self.login_id}@{self.server}: "
+                                   f"{m.last_error()}")
+        self._mt5 = m
+        self._connected = True
+        return self
+
+    def disconnect(self):
+        if self._mt5 is not None and self._connected:
+            try:
+                self._mt5.shutdown()
+            except Exception:
+                pass
+        self._connected = False
+
+    def is_connected(self):
+        return self._connected
+
+    def account_label(self) -> str:
+        return f"{self.login_id}@{self.server}" if self.login_id else "mt5"
+
+    # ----- readback (real, two-way) ----- #
+    def account(self) -> dict:
+        info = self._mt5.account_info()
+        if info is None:
+            return {"balance": 0.0, "equity": 0.0}
+        return {"balance": float(info.balance), "equity": float(info.equity),
+                "currency": getattr(info, "currency", "")}
+
+    def positions(self) -> dict:
+        m = self._mt5
+        out: dict[str, dict] = {}
+        for p in (m.positions_get() or []):
+            signed = p.volume if p.type == m.POSITION_TYPE_BUY else -p.volume
+            if p.symbol in out:
+                out[p.symbol]["qty"] += signed
+            else:
+                out[p.symbol] = {"qty": signed, "entry": p.price_open}
+        return out
+
+    # ----- orders ----- #
+    def _filling(self, symbol):
+        return self._mt5.ORDER_FILLING_IOC
+
+    def place_bracket(self, symbol, qty, side, entry, stop, target,
+                      entry_type="MKT") -> BracketResult:
+        m = self._mt5
+        info = m.symbol_info(symbol)
+        if info is None:
+            return BracketResult(order_id="", symbol=symbol, side=side.upper(), qty=qty,
+                                 entry=entry, stop=stop, target=target,
+                                 status="error[unknown symbol]", broker=self.name)
+        if not getattr(info, "visible", True):
+            m.symbol_select(symbol, True)
+        tick = m.symbol_info_tick(symbol)
+        is_buy = side.upper() == "BUY"
+        price = (tick.ask if is_buy else tick.bid) if tick else entry
+        request = {
+            "action": m.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(qty),
+            "type": m.ORDER_TYPE_BUY if is_buy else m.ORDER_TYPE_SELL,
+            "price": price,
+            "sl": float(stop),
+            "tp": float(target),
+            "deviation": self.deviation,
+            "magic": self.magic,
+            "comment": "qflow-bot",
+            "type_time": m.ORDER_TIME_GTC,
+            "type_filling": self._filling(symbol),
+        }
+        res = m.order_send(request)
+        ok = res is not None and res.retcode == m.TRADE_RETCODE_DONE
+        status = "filled" if ok else f"error[{getattr(res, 'retcode', '?')}]"
+        return BracketResult(order_id=str(getattr(res, "order", "") or ""), symbol=symbol,
+                             side=side.upper(), qty=qty, entry=price, stop=stop,
+                             target=target, status=status, broker=self.name)
+
+    def place_market(self, symbol, qty, side, price=0.0) -> BracketResult:
+        # a bracket with SL/TP disabled (0.0 = MT5 treats as none)
+        return self.place_bracket(symbol, qty, side, entry=price, stop=0.0, target=0.0)
+
+    def cancel_all(self, symbol=None):
+        m = self._mt5
+        for o in (m.orders_get() or []):           # pending orders
+            if symbol and o.symbol != symbol:
+                continue
+            m.order_send({"action": m.TRADE_ACTION_REMOVE, "order": o.ticket})
+        self.flatten(symbol)
+
+    def flatten(self, symbol=None):
+        m = self._mt5
+        for p in (m.positions_get() or []):
+            if symbol and p.symbol != symbol:
+                continue
+            is_buy = p.type == m.POSITION_TYPE_BUY
+            tick = m.symbol_info_tick(p.symbol)
+            price = (tick.bid if is_buy else tick.ask) if tick else p.price_open
+            m.order_send({
+                "action": m.TRADE_ACTION_DEAL,
+                "symbol": p.symbol,
+                "volume": p.volume,
+                "type": m.ORDER_TYPE_SELL if is_buy else m.ORDER_TYPE_BUY,
+                "position": p.ticket,
+                "price": price,
+                "deviation": self.deviation,
+                "magic": self.magic,
+                "comment": "qflow-flat",
+                "type_time": m.ORDER_TIME_GTC,
+                "type_filling": self._filling(p.symbol),
+            })
