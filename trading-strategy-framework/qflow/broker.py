@@ -143,13 +143,16 @@ class IBKRBroker(BrokerAdapter):
     name = "ibkr"
 
     def __init__(self, host="127.0.0.1", port=7497, client_id=1,
-                 allow_live=False, exchange="SMART", currency="USD"):
+                 allow_live=False, exchange="SMART", currency="USD",
+                 primary_exchange=""):
         if port in _LIVE_PORTS and not allow_live:
             raise ValueError(
                 f"Port {port} is a LIVE trading port. Pass allow_live=True to "
                 "trade real money — or use the paper port 7497.")
         self.host, self.port, self.client_id = host, port, client_id
         self.exchange, self.currency = exchange, currency
+        # e.g. 'BM' (Bolsa de Madrid) for Spanish stocks with SMART routing
+        self.primary_exchange = primary_exchange
         self.ib = None
 
     def connect(self):
@@ -181,6 +184,9 @@ class IBKRBroker(BrokerAdapter):
 
     def _contract(self, symbol):
         from ib_insync import Stock
+        if self.primary_exchange:
+            return Stock(symbol, self.exchange, self.currency,
+                         primaryExchange=self.primary_exchange)
         return Stock(symbol, self.exchange, self.currency)
 
     def account(self) -> dict:

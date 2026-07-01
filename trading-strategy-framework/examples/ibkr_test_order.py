@@ -24,6 +24,10 @@ def main():
     ap.add_argument("--port", type=int, default=4002, help="4002 Gateway paper / 7497 TWS paper")
     ap.add_argument("--price", type=float, default=0.0,
                     help="reference price (else fetched as delayed data)")
+    ap.add_argument("--currency", default="USD", help="USD, EUR ...")
+    ap.add_argument("--exchange", default="SMART")
+    ap.add_argument("--primary", default="",
+                    help="primary exchange, e.g. BM for Bolsa de Madrid (Spanish stocks)")
     ap.add_argument("--flatten", action="store_true", help="cancel orders + close positions")
     args = ap.parse_args()
 
@@ -34,7 +38,8 @@ def main():
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     from qflow import broker
-    ib = broker.IBKRBroker(port=args.port)      # paper by default
+    ib = broker.IBKRBroker(port=args.port, exchange=args.exchange,
+                           currency=args.currency, primary_exchange=args.primary)
     ib.connect()
     print(f"connected to {args.port} — accounts: {ib.ib.managedAccounts()}")
 
@@ -48,8 +53,7 @@ def main():
     # get a reference price (delayed data is fine for a test)
     price = args.price
     if not price:
-        from ib_insync import Stock
-        c = Stock(args.symbol, "SMART", "USD")
+        c = ib._contract(args.symbol)
         ib.ib.qualifyContracts(c)
         ib.ib.reqMarketDataType(3)              # 3 = delayed
         t = ib.ib.reqMktData(c, "", False, False)
@@ -58,7 +62,8 @@ def main():
         if price != price or price <= 0:        # NaN or invalid
             price = t.close or 0
     if not price or price <= 0:
-        print("Could not fetch a price. Re-run with --price <approx price>.")
+        print(f"Could not fetch a price for {args.symbol} (no market-data "
+              "subscription for this exchange?). Re-run with --price <approx>.")
         ib.disconnect()
         return
 
