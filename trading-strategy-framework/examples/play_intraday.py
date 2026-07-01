@@ -106,33 +106,37 @@ def main():
                 if len(df) < 30:
                     rows.append(f"  {sym:<5} not enough bars"); continue
 
-                ts = df.index[-1]
-                rsi = ind.rsi(df["close"], args.rsi_window).iloc[-1]
-                atr = float(ind.atr(df, 14).iloc[-1])
-                price = float(df["close"].iloc[-1])
+                # use the last CLOSED 5-minute bar (drop the still-forming one),
+                # so we act once per completed bar instead of spamming every poll
+                closed = df.iloc[:-1]
+                ts = closed.index[-1]
+                rsi = ind.rsi(closed["close"], args.rsi_window).iloc[-1]
+                atr = float(ind.atr(closed, 14).iloc[-1])
+                price = float(df["close"].iloc[-1])          # latest price for the order
                 held = sym in positions and abs(positions[sym]["qty"]) > 0
                 tag = "held" if held else "flat"
 
-                # act only on a NEW bar, only when flat
                 new_bar = last_bar.get(sym) != ts
                 action = ""
                 try:
+                    side = None
                     if new_bar and not held and atr > 0:
                         if rsi < args.rsi_buy:
-                            q = size(args.capital, args.risk, atr, args.stop_atr, price)
-                            broker.place_bracket(sym, q, "BUY", entry=price,
-                                                 stop=price - args.stop_atr * atr,
-                                                 target=price + args.target_atr * atr)
-                            action = f"🟢 BUY {q}"
+                            side = "BUY"
                         elif args.allow_short and rsi > args.rsi_sell:
-                            q = size(args.capital, args.risk, atr, args.stop_atr, price)
-                            broker.place_bracket(sym, q, "SELL", entry=price,
-                                                 stop=price + args.stop_atr * atr,
-                                                 target=price - args.target_atr * atr)
-                            action = f"🔴 SHORT {q}"
-                    if action:
+                            side = "SELL"
+                    if side:
+                        q = size(args.capital, args.risk, atr, args.stop_atr, price)
+                        stop = price - args.stop_atr * atr if side == "BUY" else price + args.stop_atr * atr
+                        tgt = price + args.target_atr * atr if side == "BUY" else price - args.target_atr * atr
+                        broker.place_bracket(sym, q, side, entry=price, stop=stop, target=tgt)
                         trades_placed += 1
-                        broker.ib.sleep(1)      # let the order register
+                        broker.ib.sleep(2)                   # wait for the fill
+                        got = broker.positions().get(sym, {})
+                        filled = abs(got.get("qty", 0)) > 0
+                        emoji = "🟢" if side == "BUY" else "🔴"
+                        action = f"{emoji} {side} {q} " + ("✓filled" if filled
+                                                           else "✗ not filled (cancel/borrow?)")
                 except Exception as e:
                     action = f"⚠️ order error ({type(e).__name__})"
                 last_bar[sym] = ts
