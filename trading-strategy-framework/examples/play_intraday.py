@@ -63,7 +63,29 @@ def main():
           f"{'short' if args.allow_short else '(long-only)'} | poll {args.poll}s "
           f"| Ctrl+C to stop\n")
 
+    try:
+        start_equity = float(broker.account().get("equity", args.capital))
+    except Exception:
+        start_equity = args.capital
+
+    def summary():
+        try:
+            eq = float(broker.account().get("equity", start_equity))
+        except Exception:
+            eq = start_equity
+        pos = {}
+        try:
+            pos = broker.positions()
+        except Exception:
+            pass
+        print(f"\n📊 SUMMARY | entries {trades_placed} | "
+              f"start ${start_equity:,.0f} -> equity ${eq:,.0f} | "
+              f"P&L ${eq - start_equity:+,.0f}")
+        if pos:
+            print("   still open:", {s: v['qty'] for s, v in pos.items()})
+
     last_bar = {}          # symbol -> last processed 5m timestamp (idempotency)
+    trades_placed = 0
     start = time.time()
     try:
         while True:
@@ -107,23 +129,33 @@ def main():
                                                  target=price - args.target_atr * atr)
                             action = f"🔴 SHORT {q}"
                     if action:
+                        trades_placed += 1
                         broker.ib.sleep(1)      # let the order register
                 except Exception as e:
                     action = f"⚠️ order error ({type(e).__name__})"
                 last_bar[sym] = ts
-                rows.append(f"  {sym:<5} {price:>8.2f}  RSI {rsi:>5.1f}  {tag:<4} {action}")
+                # unrealised P&L on any open position (mark to last price)
+                upnl = ""
+                if held:
+                    p = positions[sym]
+                    upnl = f"  uP&L {p['qty'] * (price - p['entry']):+,.0f}"
+                rows.append(f"  {sym:<5} {price:>8.2f}  RSI {rsi:>5.1f}  {tag:<4} {action}{upnl}")
 
             try:
-                eq = broker.account().get("equity", "?")
+                eq = float(broker.account().get("equity", start_equity))
+                pnl = f"{eq - start_equity:+,.0f}"
+                eq = f"{eq:,.0f}"
             except Exception:
-                eq = "?"
+                eq, pnl = "?", "?"
             stamp = datetime.now().strftime("%H:%M:%S")
-            print(f"[{stamp}] equity {eq}  positions {len(positions)}")
+            print(f"[{stamp}] equity ${eq}  P&L ${pnl}  positions {len(positions)}  "
+                  f"entries {trades_placed}")
             print("\n".join(rows) + "\n")
 
             if args.minutes and (time.time() - start) > args.minutes * 60:
                 print("⏰ time's up — flattening everything.")
                 broker.cancel_all(); broker.flatten()
+                summary()
                 break
             # IMPORTANT: ib.sleep() pumps the ib_insync event loop so the IBKR
             # connection stays alive during the wait (a plain time.sleep starves
@@ -135,8 +167,10 @@ def main():
                 broker.connect()
                 time.sleep(5)
     except KeyboardInterrupt:
-        print("\n👋 stopped. Open positions/brackets remain at IBKR — "
-              "run  python examples/ibkr_test_order.py --flatten  to clear them.")
+        print("\n👋 stopped.")
+        summary()
+        print("   Open positions/brackets remain at IBKR — run "
+              "python examples/ibkr_test_order.py --flatten  to clear them.")
     finally:
         broker.disconnect()
 
