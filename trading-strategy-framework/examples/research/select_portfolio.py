@@ -19,7 +19,7 @@ Offline it uses the bundled samples. On your machine, scan your real basket with
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import warnings
 warnings.filterwarnings("ignore")

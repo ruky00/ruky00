@@ -25,7 +25,7 @@ take-profit that live on IBKR's servers (honoured even if this script dies).
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import warnings
 warnings.filterwarnings("ignore")
