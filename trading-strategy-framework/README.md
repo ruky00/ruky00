@@ -110,14 +110,21 @@ python examples/paper_trade.py --symbol TSLA --kill-switches --max-drawdown 0.08
 A broker layer turns signals into real orders. `IBKRBroker` submits **native
 bracket orders** — every entry carries a stop-loss and take-profit that live on
 IBKR's servers (honoured even if your script dies). Defaults to the **paper
-port**; live ports require `allow_live=True`. Backtests never send orders. Full
-guide: **[`docs/BROKER.md`](docs/BROKER.md)**.
+port**; live ports require `allow_live=True`. Backtests never send orders. Concepts:
+**[`docs/BROKER.md`](docs/BROKER.md)** · step-by-step IB Gateway setup:
+**[`docs/SETUP_IBKR.md`](docs/SETUP_IBKR.md)**.
 
+```bash
+# forward-test through IB Gateway paper (port 4002) with kill-switches + news
+python examples/paper_trade.py --symbol AAPL --source yahoo --strategy mean_reversion \
+    --risk 0.005 --kill-switches --broker ibkr --ibkr-port 4002 --news rss --step
+```
 ```python
 from qflow.paper import PaperTrader
 from qflow import broker
 pt = PaperTrader("AAPL", source="yahoo", strategy="mean_reversion",
-                 risk_limits={"max_drawdown": 0.08}, broker=broker.IBKRBroker(port=7497))
+                 risk_limits={"max_drawdown": 0.08},
+                 broker=broker.IBKRBroker(port=4002))   # 4002 IB Gateway paper
 pt.step()    # the only path that places real orders
 ```
 
@@ -173,7 +180,7 @@ trading-strategy-framework/
 ├── examples/         # run_all · compare_strategies · find_edges · news_demo · paper_trade
 ├── tests/            # test_framework.py — 28 correctness checks
 ├── data/samples/     # bundled REAL sample datasets (AAPL, TSLA)
-├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · BROKER · PAPER_TRADING · DISCLAIMER
+├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · BROKER · SETUP_IBKR · PAPER_TRADING · DISCLAIMER
 ├── requirements.txt
 └── LICENSE           # MIT
 ```

@@ -50,6 +50,14 @@ def main():
     ap.add_argument("--max-daily-loss", type=float, default=0.03)
     ap.add_argument("--max-drawdown", type=float, default=0.15)
     ap.add_argument("--max-heat", type=float, default=0.06)
+    ap.add_argument("--broker", default="none", choices=["none", "paper", "ibkr"],
+                    help="route real orders on --step (ibkr needs TWS/IB Gateway)")
+    ap.add_argument("--ibkr-port", type=int, default=4002,
+                    help="4002 IB Gateway paper (default), 7497 TWS paper, "
+                         "4001/7496 = LIVE")
+    ap.add_argument("--ibkr-host", default="127.0.0.1")
+    ap.add_argument("--ibkr-allow-live", action="store_true",
+                    help="required to connect to a LIVE port (real money)")
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--risk", type=float, default=0.01)
     ap.add_argument("--step", action="store_true", help="process the latest bar")
@@ -81,11 +89,20 @@ def main():
                        "max_drawdown": args.max_drawdown,
                        "max_portfolio_heat": args.max_heat}
 
+    broker_obj = None
+    if args.broker == "paper":
+        from qflow import broker as brk
+        broker_obj = brk.PaperBroker(cash=args.capital)
+    elif args.broker == "ibkr":
+        from qflow import broker as brk
+        broker_obj = brk.IBKRBroker(host=args.ibkr_host, port=args.ibkr_port,
+                                    allow_live=args.ibkr_allow_live)
+
     kw = dict(symbol=args.symbol, source=args.source, strategy=args.strategy,
               capital=args.capital, risk_per_trade=args.risk,
               feed_kwargs=feed_kwargs, leader_symbol=args.leader_symbol,
               leader_source=args.leader_source, news_provider=news_provider,
-              risk_limits=risk_limits)
+              risk_limits=risk_limits, broker=broker_obj)
 
     if args.reset:
         PaperTrader(**kw).reset()

@@ -3,11 +3,14 @@ Run a strategy through Interactive Brokers — PAPER account by default.
 
 PREREQUISITES (on your own machine — not in this sandbox):
   1. pip install ib_insync
-  2. Open TWS or IB Gateway, log in to your PAPER account.
-  3. Enable the API:  Configure > API > Settings >
+  2. Open IB Gateway (or TWS), log in to your PAPER account.
+  3. Enable the API:  Configure > Settings > API > Settings >
         [x] Enable ActiveX and Socket Clients
-        Socket port = 7497   (paper)     # 7496 is LIVE
+        [ ] Read-Only API   (leave UNCHECKED so it can place orders)
+        Socket port = 4002   (IB Gateway paper)   # TWS paper = 7497
   4. Run this script.
+
+PORTS:  IB Gateway paper 4002 · TWS paper 7497 · Gateway live 4001 · TWS live 7496
 
 SAFETY
   * Defaults to the paper port 7497. The live ports (7496/4001) require
@@ -32,8 +35,8 @@ from qflow import broker, news
 
 
 def main():
-    # 1) the broker — PAPER port 7497 by default
-    ib = broker.IBKRBroker(host="127.0.0.1", port=7497, client_id=1)
+    # 1) the broker — IB Gateway PAPER port 4002 (use 7497 for TWS paper)
+    ib = broker.IBKRBroker(host="127.0.0.1", port=4002, client_id=1)
 
     # 2) the strategy account, with kill-switches and a news overlay
     pt = PaperTrader(
