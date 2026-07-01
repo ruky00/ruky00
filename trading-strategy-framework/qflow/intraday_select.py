@@ -1,0 +1,87 @@
+"""
+Autonomous intraday selection — let the bot pick its own (strategy, interval).
+
+The lab (`examples/research/intraday_lab.py`) does this interactively; this module
+packages the same logic so the *bot* can call it at startup and be self-sufficient:
+for a symbol's recent 5-minute bars it sweeps the intraday strategies across
+candle intervals, walk-forwards each out-of-sample, and returns the best
+(strategy, interval) by OOS Sharpe — or nothing if no combination clears a
+minimum bar (better to sit out than trade a non-edge).
+
+    from qflow import feeds, intraday_select
+    df = feeds.from_yahoo("NVDA", rng="60d", interval="5m")
+    choice = intraday_select.select_best(df)
+    # -> {"strategy": "vwap_reversion", "interval": "30m", "oos_sharpe": 0.4, ...}
+
+Kept separate from intraday_strategies.py to avoid an import cycle (this imports
+optimize, which imports strategies, which imports intraday_strategies).
+"""
+
+from __future__ import annotations
+
+from . import data, strategies, optimize
+
+# interval label -> (resample rule or None for native 5m, bars/day for annualising)
+INTERVALS = {"5m": (None, 78), "15m": ("15min", 26), "30m": ("30min", 13)}
+
+STRATS = ["vwap_reversion", "opening_range", "intraday_momentum", "intraday_auto"]
+
+# walk-forward grids (intraday_auto gets a small ADX grid)
+GRIDS = dict(strategies.INTRADAY_GRIDS)
+GRIDS["intraday_auto"] = {"adx_threshold": [20.0, 25.0, 30.0]}
+
+
+def _bars(df, rule):
+    return df if rule is None else data.resample_ohlcv(df, rule)
+
+
+def evaluate(df, strats=None, intervals=None, capital=100_000.0, risk=0.004,
+             stop_atr=1.5, target_atr=2.5, n_splits=3, train_frac=0.6):
+    """
+    Walk-forward every (strategy, interval) on `df` (native 5m bars).
+
+    Returns a list of dicts sorted by OOS Sharpe (best first), each:
+        {strategy, interval, oos_sharpe, oos_return, oos_maxdd, folds}
+    """
+    strats = strats or STRATS
+    intervals = intervals or list(INTERVALS)
+    bt = {"risk_per_trade": risk, "stop_atr": stop_atr,
+          "target_atr": target_atr, "flatten_eod": True}
+    rows = []
+    for name in strats:
+        for label in intervals:
+            rule, _ = INTERVALS[label]
+            bars = _bars(df, rule)
+            try:
+                wf = optimize.walk_forward(bars, name, GRIDS[name],
+                                           n_splits=n_splits, train_frac=train_frac,
+                                           metric="sharpe", min_trades=3,
+                                           capital=capital, bt_kwargs=bt)
+            except Exception:
+                continue
+            st = wf.get("oos_stats")
+            if not st:
+                continue
+            rows.append({
+                "strategy": name,
+                "interval": label,
+                "oos_sharpe": float(st["OOS Sharpe"]),
+                "oos_return": float(st["OOS Total Return"]),
+                "oos_maxdd": float(st["OOS Max Drawdown"]),
+                "folds": len(wf.get("folds", [])),
+            })
+    rows.sort(key=lambda r: r["oos_sharpe"], reverse=True)
+    return rows
+
+
+def select_best(df, min_sharpe=0.0, max_dd=-0.5, **kwargs):
+    """
+    Pick the single best (strategy, interval) for `df`, or None if nothing clears
+    the bar. A choice must have OOS Sharpe >= `min_sharpe` and OOS max drawdown
+    shallower than `max_dd` (e.g. -0.5 = don't accept worse than -50%).
+    """
+    ranked = evaluate(df, **kwargs)
+    for r in ranked:
+        if r["oos_sharpe"] >= min_sharpe and r["oos_maxdd"] >= max_dd:
+            return r
+    return None

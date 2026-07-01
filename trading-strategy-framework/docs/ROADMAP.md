@@ -37,7 +37,7 @@ and purpose.
   intraday momentum, and the `intraday_auto` combiner) with per-strategy
   parameter grids, an interval sweep (5m/15m/30m via `data.resample_ohlcv`) and
   intraday walk-forward (`examples/research/intraday_lab.py`).
-- 40 passing tests.
+- 44 passing tests.
 
 **The Funded Bot (product 2)**
 - `bot/intraday_bot.py`: runs qflow strategies on 5-minute bars, ATR SL/TP
@@ -45,6 +45,14 @@ and purpose.
   display, account-level kill-switches.
 - IBKR execution: bracket orders, free delayed market data, real order-status
   reporting, TIF/preset handling, client-id isolation.
+- **Autonomous mode (`--auto-select`)**: the bot picks its own
+  (strategy, interval) per symbol by walk-forwarding the intraday strategies
+  out-of-sample at startup — no manual strategy choice.
+- **Funded-exam engine (`--funded`, `qflow/funded.py`)**: encodes the prop-firm
+  challenge (profit target + hard daily-loss / total-drawdown limits, static or
+  trailing) with **dynamic greedy-but-capped sizing** — full/boosted size while
+  there's cushion, throttling down as it nears a limit, stopping *before* it can
+  breach, and locking the pass once the target is hit.
 
 ## 📍 Where we are (now)
 - End-to-end **works on IBKR paper**: signals → orders with SL/TP → fills saved
@@ -69,17 +77,21 @@ and purpose.
    5m bars for the names the bot will trade.
 3. **Session controls**: auto-flat before the close, no new entries in the last
    30 min, max trades/day, max concurrent positions.
-4. **Funded-account rules engine**: encode the prop-firm limits (max daily loss,
-   max total drawdown, profit target) as hard kill-switches so the bot can never
-   breach them.
+4. ✅ **Funded-account rules engine** (`qflow/funded.py`, `bot/intraday_bot.py
+   --funded`): profit target + max daily loss + max total drawdown (static or
+   trailing) as hard limits, with greedy-but-capped dynamic sizing that de-risks
+   before it can breach and locks the pass at target. *Next:* per-trade journal
+   to CSV + min-trading-days pacing so the exam completes on schedule.
 
 **Medium term — robustness & automation**
 5. **Real-time data path**: pull 5m bars from IBKR directly (not delayed Yahoo)
    for tighter fills; make delayed-vs-realtime explicit.
 6. **Auto-restart / 24-5 operation**: IBC to auto-login IB Gateway + a supervisor
    that restarts the bot and reconciles positions daily.
-7. **Walk-forward the intraday strategies** and run `portfolio_selector` on the
-   intraday timeframe to pick the intraday (symbol, strategy) shortlist.
+7. ✅ **Walk-forward the intraday strategies** and let the bot self-select the
+   intraday (symbol, strategy, interval) shortlist (`qflow/intraday_select.py`,
+   `--auto-select`). *Next:* cache the selection to disk + re-select on a
+   schedule instead of every startup.
 8. **Broker abstraction**: add Alpaca / ccxt adapters behind the same interface
    (crypto runs 24/7 and has no PDT/borrow constraints — a natural funded-bot fit).
 

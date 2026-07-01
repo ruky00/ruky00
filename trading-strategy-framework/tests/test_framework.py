@@ -98,6 +98,63 @@ def test_intraday_walk_forward_oos():
     assert "OOS Sharpe" in wf["oos_stats"]
 
 
+def test_funded_greedy_but_capped_sizing():
+    from qflow.funded import FundedAccount
+    fa = FundedAccount({"profit_target": 0.08, "max_daily_loss": 0.05,
+                        "max_total_drawdown": 0.10, "base_risk": 0.004,
+                        "max_risk_mult": 1.5, "min_risk_mult": 0.25}, start_equity=100_000)
+    fa.update(100_000, "2026-07-01")
+    full = fa.risk_fraction()
+    assert abs(full - 0.006) < 1e-9              # greedy: 0.4% * 1.5 boost at full cushion
+    fa.update(97_000, "2026-07-01")              # -3% day (cushion 0.4)
+    throttled = fa.risk_fraction()
+    assert throttled < full                       # de-risks as it approaches the daily limit
+    assert fa.can_open()[0]                        # still allowed (below stop buffer)
+
+
+def test_funded_stops_before_breach_and_latches():
+    from qflow.funded import FundedAccount
+    fa = FundedAccount({"max_daily_loss": 0.05, "stop_buffer": 0.80}, start_equity=100_000)
+    fa.update(100_000, "2026-07-01")
+    fa.update(95_800, "2026-07-01")              # -4.2% = 84% of the 5% allowance
+    ok, why = fa.can_open()
+    assert not ok and "daily" in why.lower()      # stops opening BEFORE the -5% breach
+    assert not fa.state.failed                     # and hasn't failed yet
+    # a real breach latches failure
+    fa.update(94_000, "2026-07-01")              # -6% > 5%
+    assert fa.state.failed
+
+
+def test_funded_target_latches_pass_and_daily_reset():
+    from qflow.funded import FundedAccount
+    fa = FundedAccount({"profit_target": 0.08}, start_equity=100_000)
+    fa.update(100_000, "2026-07-01")
+    fa.on_open()
+    fa.update(96_000, "2026-07-01")              # down on day 1 (traded)
+    fa.update(96_000, "2026-07-02")              # new day: daily anchor resets
+    assert fa.day_loss() == 0.0                    # fresh daily allowance
+    assert fa.state.trading_days == 1              # day 1 counted as a trading day
+    fa.update(109_000, "2026-07-02")             # +9% vs 100k anchor -> pass
+    assert fa.state.passed and not fa.can_open()[0]
+
+
+def test_intraday_autoselect_ranks_and_picks():
+    df = data.synthetic_intraday(n_days=90, seed=4)
+    from qflow import intraday_select
+    ranked = intraday_select.evaluate(df, strats=["vwap_reversion", "opening_range"],
+                                      intervals=["15m", "30m"])
+    assert ranked and all("oos_sharpe" in r for r in ranked)
+    # sorted best-first
+    assert ranked == sorted(ranked, key=lambda r: r["oos_sharpe"], reverse=True)
+    # select_best returns a valid pick or None (never garbage)
+    pick = intraday_select.select_best(df, min_sharpe=-99,
+                                       strats=["vwap_reversion"], intervals=["30m"])
+    assert pick is None or (pick["strategy"] in strategies.REGISTRY and pick["interval"] == "30m")
+    # an impossible bar yields None (sit out rather than trade a non-edge)
+    assert intraday_select.select_best(df, min_sharpe=99, strats=["vwap_reversion"],
+                                       intervals=["30m"]) is None
+
+
 def test_backtest_runs_and_is_causal():
     df = _df()
     sig = strategies.trend_following(df)

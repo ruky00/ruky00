@@ -17,6 +17,8 @@ montecarlo  : trade-bootstrap Monte-Carlo robustness analysis
 portfolio   : risk-based portfolio construction & allocation
 risk        : position sizing and risk/reward helpers
 risk_governor: portfolio kill-switches (daily loss, drawdown, heat, streak)
+funded      : funded-account rules engine (profit target / daily-loss / drawdown + greedy sizing)
+intraday_select: autonomous (strategy, interval) picker via intraday walk-forward
 broker      : execution adapters — PaperBroker + IBKRBroker (bracket orders)
 paper       : persistent paper-trading engine for forward testing
 portfolio_runner: run a strategy across a basket of symbols (shared broker session)
@@ -42,6 +44,8 @@ from . import (  # noqa: F401
     backtest,
     strategies,
     intraday_strategies,
+    intraday_select,
+    funded,
     daily,
     regime,
     multifactor,
