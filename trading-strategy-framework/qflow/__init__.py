@@ -9,6 +9,7 @@ indicators  : vectorised technical indicators (SMA/EMA/RSI/ATR/MACD/BB/ADX)
 metrics     : performance statistics (CAGR, Sharpe, Sortino, max DD, win rate)
 backtest    : event-light vectorised backtester with ATR-based risk sizing
 strategies  : reference strategies (trend, mean-reversion, breakout)
+intraday_strategies: dedicated intraday strategies (VWAP reversion, opening range, ...)
 daily       : intraday edge strategies (gap-fade, cross-market lead-lag)
 regime      : market-regime classification (trend / volatility / volume)
 multifactor : momentum + value + volatility + trend cross-sectional model
@@ -40,6 +41,7 @@ from . import (  # noqa: F401
     metrics,
     backtest,
     strategies,
+    intraday_strategies,
     daily,
     regime,
     multifactor,

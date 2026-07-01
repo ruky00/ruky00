@@ -33,7 +33,11 @@ and purpose.
   correlation filter and a portfolio-level drawdown circuit breaker.
 - News + sentiment overlay (RSS/Finnhub/Bloomberg/FinBERT).
 - Paper-trading engine (persistent forward test + go-live readiness gate).
-- 36 passing tests.
+- **Dedicated intraday strategies** (VWAP reversion, opening-range breakout,
+  intraday momentum, and the `intraday_auto` combiner) with per-strategy
+  parameter grids, an interval sweep (5m/15m/30m via `data.resample_ohlcv`) and
+  intraday walk-forward (`examples/research/intraday_lab.py`).
+- 40 passing tests.
 
 **The Funded Bot (product 2)**
 - `bot/intraday_bot.py`: runs qflow strategies on 5-minute bars, ATR SL/TP
@@ -55,8 +59,14 @@ and purpose.
 2. ✅ **Intraday backtester** on 5-minute bars with end-of-day flattening
    (`run_backtest(..., flatten_eod=True)`, `examples/research/backtest_intraday.py`).
    First finding: the daily strategies run *naively* on 5m bars **lose money**
-   (costs eat the many small trades) — so the next step is intraday-*tuned*
-   strategies + walk-forward on the intraday timeframe, not reusing daily params.
+   (costs eat the many small trades).
+2b. ✅ **Dedicated intraday strategies + interval selection + walk-forward**
+   (`qflow/intraday_strategies.py`, `examples/research/intraday_lab.py`): VWAP
+   reversion, opening-range breakout, intraday momentum and `intraday_auto`,
+   swept across 5m/15m/30m and validated out-of-sample. Finding on synthetic
+   data: coarser bars (30m) bleed far less to costs than 5m, and only the
+   VWAP-reversion edge survives the walk-forward — a template to re-run on real
+   5m bars for the names the bot will trade.
 3. **Session controls**: auto-flat before the close, no new entries in the last
    30 min, max trades/day, max concurrent positions.
 4. **Funded-account rules engine**: encode the prop-firm limits (max daily loss,

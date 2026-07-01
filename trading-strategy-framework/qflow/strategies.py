@@ -310,3 +310,12 @@ REGISTRY = {
     "auto": adaptive,
     "auto_wf": adaptive_walk_forward,   # auto + per-year walk-forward-optimised params
 }
+
+# Register the dedicated intraday strategies (vwap_reversion, opening_range,
+# intraday_momentum, intraday_auto) so walk_forward / portfolio_selector / the
+# bot can reach them by name through REGISTRY. They expect intraday bars and a
+# backtest run with flatten_eod=True. Imported last to avoid a circular import
+# (intraday_strategies imports StrategySignal from this module).
+from . import intraday_strategies as _intraday   # noqa: E402
+REGISTRY.update(_intraday.INTRADAY_REGISTRY)
+INTRADAY_GRIDS = _intraday.INTRADAY_GRIDS

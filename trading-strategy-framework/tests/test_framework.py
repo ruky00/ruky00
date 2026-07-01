@@ -61,6 +61,43 @@ def test_intraday_backtest_flattens_overnight():
     assert len(res.equity) == len(df) and res.equity.iloc[0] > 0
 
 
+def test_intraday_strategies_and_registration():
+    df = data.synthetic_intraday(n_days=30, seed=5)
+    # all four dedicated intraday strategies are registered and reachable by name
+    for name in ["vwap_reversion", "opening_range", "intraday_momentum", "intraday_auto"]:
+        assert name in strategies.REGISTRY, name
+        s = strategies.REGISTRY[name](df)
+        assert s.execution == "intraday", name
+        assert s.signal.isin([-1, 0, 1]).all(), name
+        assert len(s.signal) == len(df), name
+        assert (s.atr.dropna() >= 0).all(), name
+    # they actually trade something intraday (not flat forever)
+    assert (strategies.REGISTRY["vwap_reversion"](df).signal != 0).any()
+
+
+def test_resample_ohlcv_aggregates():
+    df = data.synthetic_intraday(n_days=10, seed=2)
+    r = data.resample_ohlcv(df, "30min")
+    assert len(r) < len(df)                      # coarser bars => fewer rows
+    assert list(r.columns) == ["open", "high", "low", "close", "volume"]
+    assert (r["high"] >= r["low"]).all()
+    assert r["volume"].sum() > 0
+    # OHLC integrity: high is the max, low the min within each bucket
+    assert (r["high"] >= r[["open", "close"]].max(axis=1)).all()
+    assert (r["low"] <= r[["open", "close"]].min(axis=1)).all()
+
+
+def test_intraday_walk_forward_oos():
+    df = data.synthetic_intraday(n_days=90, seed=8)
+    wf = optimize.walk_forward(df, "vwap_reversion",
+                               strategies.INTRADAY_GRIDS["vwap_reversion"],
+                               n_splits=3, train_frac=0.6, metric="sharpe",
+                               min_trades=3, capital=100_000,
+                               bt_kwargs={"risk_per_trade": 0.002, "flatten_eod": True})
+    assert "oos_stats" in wf and wf["folds"]
+    assert "OOS Sharpe" in wf["oos_stats"]
+
+
 def test_backtest_runs_and_is_causal():
     df = _df()
     sig = strategies.trend_following(df)

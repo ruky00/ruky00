@@ -76,7 +76,9 @@ python examples/research/repeatable_edges.py    # rank patterns by year-to-year 
 python examples/research/scan_universe.py       # scan a whole universe + España<->US dual listings
 python examples/research/walk_forward.py        # rolling calendar walk-forward (train N yrs -> test next)
 python examples/research/select_portfolio.py    # auto-filter a basket to robust (symbol, strategy) pairs
-python tests/test_framework.py         # 36 correctness tests
+python examples/research/backtest_intraday.py   # daily strategies on 5m bars (they lose to costs)
+python examples/research/intraday_lab.py        # intraday strategies: pick the interval + walk-forward
+python tests/test_framework.py         # 40 correctness tests
 ```
 
 ### Finding daily edges & optimising
@@ -221,7 +223,7 @@ trading-strategy-framework/
 ├── examples/
 │   ├── research/        # backtest · walk-forward · edge-finding · universe selection (the lab)
 │   └── live/            # daily-swing paper/portfolio runners + IBKR utilities
-├── tests/               # test_framework.py — 36 correctness checks
+├── tests/               # test_framework.py — 40 correctness checks
 ├── data/samples/        # bundled REAL data (AAPL, TSLA, NVDA, AMD, NFLX, AMZN, MSFT, GOOGL)
 ├── docs/                # ROADMAP · PLAYBOOK · EDGES · PORTFOLIO · RISK · BROKER · SETUP_IBKR · PAPER_TRADING · NEWS · DISCLAIMER
 ├── requirements.txt

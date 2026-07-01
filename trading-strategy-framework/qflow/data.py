@@ -135,6 +135,22 @@ def synthetic_intraday(n_days: int = 60,
     return df
 
 
+def resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    """
+    Resample an intraday OHLCV frame to a coarser bar (e.g. 5m -> "15min" / "30min").
+
+    Aggregates correctly (open=first, high=max, low=min, close=last, volume=sum)
+    and drops the empty overnight buckets. Use it to compare which candle interval
+    an intraday strategy prefers without re-downloading data. ``rule`` is any pandas
+    offset alias: "15min", "30min", "1h", ...
+    """
+    agg = {"open": "first", "high": "max", "low": "min",
+           "close": "last", "volume": "sum"}
+    cols = [c for c in agg if c in df.columns]
+    out = df[cols].resample(rule).agg({c: agg[c] for c in cols})
+    return out.dropna(subset=["open", "high", "low", "close"])
+
+
 def load_csv(path: str) -> pd.DataFrame:
     """Load OHLCV data from a CSV with a `date` column."""
     df = pd.read_csv(path, parse_dates=["date"])
