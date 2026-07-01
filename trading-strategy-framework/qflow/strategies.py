@@ -160,8 +160,62 @@ def volatility_breakout(
     )
 
 
+# --------------------------------------------------------------------------- #
+# Adaptive — pick the best strategy per bar from the market regime
+# --------------------------------------------------------------------------- #
+def adaptive(df: pd.DataFrame, atr_window: int = 14, allow_short: bool = True) -> StrategySignal:
+    """
+    Regime-switching meta-strategy. For each bar it reads the market regime and
+    uses the signal of the strategy that fits it:
+
+        trending (bull/bear + ADX)  -> trend_following
+        high volatility (ranging)   -> volatility_breakout
+        calm / sideways             -> mean_reversion
+
+    This is what "let the bot choose the best strategy from the candles" means.
+    """
+    from . import regime
+    reg = regime.detect(df)
+    tf = trend_following(df, allow_short=allow_short)
+    mr = mean_reversion(df)
+    vb = volatility_breakout(df, allow_short=allow_short)
+    atr = ind.atr(df, atr_window)
+
+    trend = reg["trend"].values
+    vol = reg["volatility"].values
+    tfs, mrs, vbs = tf.signal.values, mr.signal.values, vb.signal.values
+    chosen = []
+    out = []
+    for i in range(len(df)):
+        if trend[i] in ("bull", "bear"):
+            out.append(int(tfs[i])); chosen.append("trend_following")
+        elif vol[i] == "high":
+            out.append(int(vbs[i])); chosen.append("volatility_breakout")
+        else:
+            out.append(int(mrs[i])); chosen.append("mean_reversion")
+    signal = pd.Series(out, index=df.index)
+    sig = StrategySignal(signal=signal, atr=atr,
+                         params=dict(mode="adaptive", atr_window=atr_window))
+    sig.chosen = pd.Series(chosen, index=df.index)   # which strategy per bar
+    return sig
+
+
+def adaptive_status(df: pd.DataFrame) -> dict:
+    """What the adaptive strategy is doing on the LATEST bar (for live display)."""
+    from . import regime
+    reg = regime.detect(df).iloc[-1]
+    sig = adaptive(df)
+    return {
+        "trend": reg["trend"],
+        "volatility": reg["volatility"],
+        "active_strategy": sig.chosen.iloc[-1],
+        "signal": int(sig.signal.iloc[-1]),   # -1 short / 0 flat / +1 long
+    }
+
+
 REGISTRY = {
     "trend_following": trend_following,
     "mean_reversion": mean_reversion,
     "volatility_breakout": volatility_breakout,
+    "auto": adaptive,
 }

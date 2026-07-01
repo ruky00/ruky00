@@ -67,6 +67,18 @@ def test_all_strategies_produce_signals():
         assert len(s.signal) == len(df), name
 
 
+def test_adaptive_regime_switching():
+    df = data.synthetic_ohlcv(1500, seed=42)
+    sig = strategies.adaptive(df)
+    assert sig.signal.isin([-1, 0, 1]).all()
+    # it actually switches between more than one sub-strategy
+    assert sig.chosen.nunique() >= 2
+    assert set(sig.chosen.unique()) <= set(strategies.REGISTRY)
+    st = strategies.adaptive_status(df)
+    assert st["active_strategy"] in strategies.REGISTRY
+    assert st["signal"] in (-1, 0, 1)
+
+
 def test_risk_sizing():
     sz = risk.position_size(10_000, 0.01, entry=100, stop=95)
     assert abs(sz["shares"] - 20.0) < 1e-9          # $100 risk / $5 per share

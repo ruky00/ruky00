@@ -516,6 +516,14 @@ class PaperTrader:
                          f"stop {p.stop:.2f} target {p.target:.2f}")
         else:
             lines.append("OPEN position      : flat")
+        if self.strategy == "auto":
+            try:
+                st = strategies.adaptive_status(self._data())
+                lines.append(f"Active strategy    : {st['active_strategy']} "
+                             f"(regime: {st['trend']}/{st['volatility']} vol, "
+                             f"signal {st['signal']:+d})")
+            except Exception:
+                pass
         if self.broker is not None:
             conn = "connected" if self.broker.is_connected() else "not connected"
             lines.append(f"Broker             : {self.broker.name} ({conn}) "
