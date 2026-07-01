@@ -102,15 +102,27 @@ FundedNext dashboard and override with `--profit-target` if needed.
 1. `pip install MetaTrader5` (Windows; on Linux/Mac run MT5 under Wine).
 2. Install the **MT5 terminal**, log into your FundedNext account, and enable
    **Algo Trading** (the terminal must stay open while the bot runs).
-3. Trade FundedNext broker symbols (`EURUSD`, `XAUUSD`, `US30`, …). MT5 volume is
-   in **lots**, so pass `--fixed-qty` (e.g. `0.10`) — the equity/ATR share-sizer
-   doesn't apply to lots.
+3. Trade FundedNext broker symbols (`EURUSD`, `XAUUSD`, `US30`, …).
+
+**Automatic lot sizing.** The bot sizes each trade in **lots** so that hitting the
+ATR stop loses the funded engine's target risk fraction of your **real equity**,
+using the symbol's tick economics from MT5 (`MT5Broker.size_for_risk`):
+
+```
+loss for 1.0 lot = (stop_distance / trade_tick_size) × trade_tick_value
+lots             = (equity × risk%) / loss_per_lot   (rounded to volume_step,
+                                                       clamped to min/max lot)
+```
+
+So every trade risks the same fraction of equity whatever the instrument, and the
+greedy-but-capped throttle scales the lots up/down with the cushion. Pass
+`--fixed-qty 0.10` only if you want to **override** the sizer with a fixed lot.
 
 ```bash
 python bot/intraday_bot.py --broker mt5 \
     --mt5-login 123456 --mt5-password "***" --mt5-server FundedNext-Server \
     --fundednext stellar_2step_p1 --auto-select \
-    --symbols EURUSD,XAUUSD --fixed-qty 0.10 --journal logs/fn.csv
+    --symbols EURUSD,XAUUSD --journal logs/fn.csv
 ```
 
 Because MT5 reports equity back, the funded engine tracks the **real** account:

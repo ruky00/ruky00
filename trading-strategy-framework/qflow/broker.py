@@ -84,6 +84,13 @@ class BrokerAdapter:
         None if this broker has no data feed (caller then falls back to feeds.*)."""
         return None
 
+    def size_for_risk(self, symbol: str, risk_amount: float, stop_dist: float,
+                      price: float = 0.0):
+        """Position size (in the broker's units) so that hitting the stop loses
+        ~`risk_amount`, or None if this broker can't size itself (caller then uses
+        its own share sizer). `stop_dist` is the stop distance in price."""
+        return None
+
 
 # --------------------------------------------------------------------------- #
 # Paper broker — in-memory, no dependencies (default / testing)
@@ -568,6 +575,36 @@ class MT5Broker(BrokerAdapter):
             else df.get("tick_volume", 0)
         return pd.DataFrame({"open": df["open"], "high": df["high"], "low": df["low"],
                              "close": df["close"], "volume": vol}, index=df.index)
+
+    def size_for_risk(self, symbol, risk_amount, stop_dist, price=0.0):
+        """
+        Lots so a stop `stop_dist` away loses ~`risk_amount` (account currency).
+
+        Uses the symbol's tick economics from MT5:
+            loss for 1.0 lot = (stop_dist / trade_tick_size) * trade_tick_value
+            lots = risk_amount / loss_per_lot   (rounded down to volume_step)
+        clamped to [volume_min, volume_max]. This is the risk-based sizing the
+        funded engine needs — every trade risks a fixed fraction of the real
+        equity, whatever the instrument's tick value.
+        """
+        import math
+        m = self._mt5
+        info = m.symbol_info(symbol)
+        if info is None or stop_dist <= 0:
+            return None
+        tick_val = getattr(info, "trade_tick_value", 0.0) or 0.0
+        tick_size = getattr(info, "trade_tick_size", 0.0) or 0.0
+        vmin = getattr(info, "volume_min", 0.01) or 0.01
+        vmax = getattr(info, "volume_max", 100.0) or 100.0
+        vstep = getattr(info, "volume_step", 0.01) or 0.01
+        if tick_val <= 0 or tick_size <= 0:
+            return vmin                              # can't size — smallest allowed
+        loss_per_lot = (stop_dist / tick_size) * tick_val
+        if loss_per_lot <= 0:
+            return vmin
+        lots = math.floor((risk_amount / loss_per_lot) / vstep) * vstep
+        lots = max(vmin, min(vmax, lots))
+        return round(lots, 8)
 
     # ----- readback (real, two-way) ----- #
     def account(self) -> dict:

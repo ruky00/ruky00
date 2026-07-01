@@ -95,11 +95,11 @@ and purpose.
    schedule instead of every startup.
 8. **Prop-firm connectors**: ✅ **FundedNext via MetaTrader 5** (`MT5Broker`,
    `--broker mt5`, `--fundednext ...`) — two-way (real fills/positions/equity),
-   the recommended path. ✅ **Lucid via webhook** (`WebhookBroker`,
-   `--broker webhook`) — one-way through TradersPost/CrossTrade. *Next:* proper
-   lot/contract sizing by instrument tick value (replace the equity share-sizer),
-   a two-way Tradovate adapter for Lucid, and Alpaca / ccxt for equities / crypto.
-   See [`FUNDED.md`](FUNDED.md).
+   the recommended path, with **automatic risk-based lot sizing** by tick value
+   (`MT5Broker.size_for_risk`) and **bars from the MT5 feed** (no Yahoo). ✅
+   **Lucid via webhook** (`WebhookBroker`, `--broker webhook`) — one-way through
+   TradersPost/CrossTrade. *Next:* a two-way Tradovate adapter for Lucid, and
+   Alpaca / ccxt for equities / crypto. See [`FUNDED.md`](FUNDED.md).
 
 **Longer term — edge & scale**
 9. Smarter execution (limit/adaptive orders, VWAP entries) to cut slippage.

@@ -194,7 +194,11 @@ def test_mt5_broker_two_way_with_fake_terminal():
         def positions_get(s): return list(s._pos)
         def orders_get(s): return []
         def symbol_info(s, sym):
-            class SI: visible = True
+            class SI:
+                visible = True
+                trade_tick_value = 1.0     # $1 per tick per 1.0 lot
+                trade_tick_size = 0.0001   # a pip
+                volume_min = 0.01; volume_max = 100.0; volume_step = 0.01
             return SI()
         def symbol_select(s, sym, v): return True
         def symbol_info_tick(s, sym): return _T(1.1002, 1.1000)
@@ -226,6 +230,12 @@ def test_mt5_broker_two_way_with_fake_terminal():
     assert r.status == "filled"
     assert f.sent[-1]["sl"] == 1.095 and f.sent[-1]["tp"] == 1.11 and f.sent[-1]["volume"] == 0.10
     assert b.positions()["EURUSD"]["qty"] == 0.10       # position read back
+    # risk-based lot sizing from tick value: risk $500, stop 50 pips (0.0050)
+    #   loss/lot = (0.0050/0.0001)*$1 = $50  ->  500/50 = 10.0 lots
+    lots = b.size_for_risk("EURUSD", risk_amount=500.0, stop_dist=0.0050)
+    assert abs(lots - 10.0) < 1e-9
+    # tiny risk clamps to the minimum lot, never zero
+    assert b.size_for_risk("EURUSD", risk_amount=0.01, stop_dist=0.0050) == 0.01
     b.flatten()
     assert f.sent[-1]["action"] == f.TRADE_ACTION_DEAL and "position" in f.sent[-1]  # closed by ticket
 

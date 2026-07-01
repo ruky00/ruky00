@@ -32,11 +32,12 @@ Run (Python 3.12 venv, IB Gateway paper open on 4002):
     python bot/intraday_bot.py --auto-select --funded --allow-short \
         --profit-target 0.08 --max-daily-loss 0.05 --max-total-drawdown 0.10
 
-    # FundedNext via MetaTrader 5 (two-way: real fills/positions/equity back).
-    # Volume is in LOTS, so pass --fixed-qty; run the MT5 terminal logged in first:
+    # FundedNext via MetaTrader 5 (two-way: real fills/positions/equity + data).
+    # Lots are sized automatically from risk × the symbol's tick value; run the
+    # MT5 terminal logged in first (--fixed-qty only to force a fixed lot):
     python bot/intraday_bot.py --broker mt5 --mt5-login 123456 --mt5-password ... \
         --mt5-server FundedNext-Server --fundednext stellar_2step_p1 \
-        --symbols EURUSD,XAUUSD --fixed-qty 0.10 --journal logs/fn.csv
+        --auto-select --symbols EURUSD,XAUUSD --journal logs/fn.csv
 
     # route to a Lucid (futures) demo via a TradersPost/CrossTrade webhook,
     # fixed 1 contract, dry-run first to inspect the payloads without sending:
@@ -141,8 +142,8 @@ def main():
     ap.add_argument("--mt5-server", default="", help="MT5 server (e.g. FundedNext-Server)")
     ap.add_argument("--mt5-path", default="", help="path to terminal64.exe (optional)")
     ap.add_argument("--fixed-qty", type=float, default=0.0,
-                    help="send a fixed quantity instead of the ATR/equity share sizer "
-                         "(futures contracts or MT5 lots, e.g. 1 or 0.10)")
+                    help="override the risk sizer with a fixed quantity (futures "
+                         "contracts or MT5 lots, e.g. 1 or 0.10)")
     ap.add_argument("--auto-select", action="store_true",
                     help="self-pick the best (strategy, interval) per symbol via "
                          "intraday walk-forward at startup (autonomous mode)")
@@ -327,7 +328,11 @@ def main():
                 try:
                     side = "BUY" if s > 0 else ("SELL" if (s < 0 and args.allow_short) else None)
                     if side and not held and atr > 0 and last_bar.get(sym) != ts:
-                        risk_amt = args.capital * risk
+                        # risk a fixed fraction of the REAL account (equity) when on a
+                        # funded account; fall back to nominal capital otherwise
+                        risk_base = equity if fund else args.capital
+                        risk_amt = risk_base * risk
+                        stop_dist = args.stop_atr * atr
                         blocked = gov.can_open(risk_amt, equity) if gov else (True, "")
                         fund_ok = fund.can_open() if fund else (True, "")
                         if gov and not blocked[0]:
@@ -335,7 +340,11 @@ def main():
                         elif fund and not fund_ok[0]:
                             action = f"⛔ {fund_ok[1]}"
                         else:
-                            q = args.fixed_qty or size(args.capital, risk, atr, args.stop_atr, price)
+                            # broker-native risk sizing (MT5 lots by tick value) →
+                            # else the equity share sizer; --fixed-qty overrides both
+                            q = (args.fixed_qty
+                                 or broker.size_for_risk(sym, risk_amt, stop_dist, price)
+                                 or size(risk_base, risk, atr, args.stop_atr, price))
                             sl = price - args.stop_atr * atr if side == "BUY" else price + args.stop_atr * atr
                             tp = price + args.target_atr * atr if side == "BUY" else price - args.target_atr * atr
                             res = broker.place_bracket(sym, q, side, entry=price,
