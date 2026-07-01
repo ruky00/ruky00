@@ -32,6 +32,12 @@ Run (Python 3.12 venv, IB Gateway paper open on 4002):
     python bot/intraday_bot.py --auto-select --funded --allow-short \
         --profit-target 0.08 --max-daily-loss 0.05 --max-total-drawdown 0.10
 
+    # route to a Lucid (futures) demo via a TradersPost/CrossTrade webhook,
+    # fixed 1 contract, dry-run first to inspect the payloads without sending:
+    python bot/intraday_bot.py --broker webhook --webhook-url https://... \
+        --lucid 50 --symbols MES,MNQ --fixed-qty 1 --journal logs/lucid.csv \
+        --webhook-dry-run
+
 Paper first. Intraday from a home PC is hard — validate on the lab, then let this
 run on the funded account only once it is consistently green.
 """
@@ -107,6 +113,16 @@ def main():
                     help="strategy to trade (ignored per-symbol when --auto-select)")
     ap.add_argument("--symbols", default="NVDA,AMD,TSLA,AAPL,MSFT")
     ap.add_argument("--interval", default="5m", help="bar size (5m, 15m, 30m, 1h)")
+    ap.add_argument("--broker", default="ibkr", choices=["ibkr", "webhook", "paper"],
+                    help="execution venue: ibkr (stocks) · webhook (Lucid via "
+                         "TradersPost/CrossTrade) · paper (offline sim)")
+    ap.add_argument("--webhook-url", default="",
+                    help="webhook URL for --broker webhook (from TradersPost/CrossTrade)")
+    ap.add_argument("--webhook-dry-run", action="store_true",
+                    help="build the webhook payloads but don't POST (safe test)")
+    ap.add_argument("--fixed-qty", type=int, default=0,
+                    help="send a fixed quantity (e.g. futures contracts) instead of "
+                         "the ATR/equity share sizer")
     ap.add_argument("--auto-select", action="store_true",
                     help="self-pick the best (strategy, interval) per symbol via "
                          "intraday walk-forward at startup (autonomous mode)")
@@ -147,20 +163,26 @@ def main():
     ap.add_argument("--minutes", type=int, default=0, help="0 = until Ctrl+C")
     args = ap.parse_args()
 
-    if sys.version_info[:2] >= (3, 13):
+    if args.broker == "ibkr" and sys.version_info[:2] >= (3, 13):
         print("=" * 70)
         print(f"⚠️  Python {sys.version_info.major}.{sys.version_info.minor}: ib_insync is "
               "unreliable on 3.13+ (fills/positions may not register). Use a 3.12 venv.")
         print("=" * 70)
 
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-    broker = brk.IBKRBroker(port=args.port, client_id=args.client_id, tif="DAY")
+    if args.broker == "webhook":
+        broker = brk.WebhookBroker(args.webhook_url, capital=args.capital,
+                                   dry_run=args.webhook_dry_run)
+    elif args.broker == "paper":
+        broker = brk.PaperBroker(cash=args.capital)
+    else:
+        broker = brk.IBKRBroker(port=args.port, client_id=args.client_id, tif="DAY")
     broker.connect()
     gov = RiskGovernor({"max_daily_loss": args.max_daily_loss,
                         "max_drawdown": args.max_drawdown}) if args.kill_switches else None
 
     mode = "AUTO-SELECT (walk-forward per symbol)" if args.auto_select else args.strategy
-    print(f"🤖 INTRADAY BOT | {mode} | account {broker.ib.managedAccounts()} | {symbols}")
+    print(f"🤖 INTRADAY BOT | {mode} | {args.broker}:{broker.account_label()} | {symbols}")
     if args.auto_select:
         print("   picking the best (strategy, interval) per symbol out-of-sample...")
     plan = build_plan(symbols, args.strategy, args.interval, args.auto_select,
@@ -278,7 +300,7 @@ def main():
                         elif fund and not fund_ok[0]:
                             action = f"⛔ {fund_ok[1]}"
                         else:
-                            q = size(args.capital, risk, atr, args.stop_atr, price)
+                            q = args.fixed_qty or size(args.capital, risk, atr, args.stop_atr, price)
                             sl = price - args.stop_atr * atr if side == "BUY" else price + args.stop_atr * atr
                             tp = price + args.target_atr * atr if side == "BUY" else price - args.target_atr * atr
                             res = broker.place_bracket(sym, q, side, entry=price,
@@ -328,7 +350,7 @@ def main():
                 broker.cancel_all(); broker.flatten(); summary(); break
             wait = max(15, args.poll)
             if broker.is_connected():
-                broker.ib.sleep(wait)
+                broker.sleep(wait)
             else:
                 broker.connect(); time.sleep(5)
     except KeyboardInterrupt:

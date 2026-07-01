@@ -138,6 +138,35 @@ def test_funded_target_latches_pass_and_daily_reset():
     assert fa.state.passed and not fa.can_open()[0]
 
 
+def test_webhook_broker_routes_and_shadow_tracks():
+    from qflow import broker as brk
+    # dry-run: shadow-tracks without posting
+    b = brk.WebhookBroker("", dry_run=True, capital=50_000)
+    b.connect()
+    r = b.place_bracket("MES", 1, "BUY", entry=5000.0, stop=4990.0, target=5020.0)
+    assert r.status == "dry-run" and r.broker == "webhook"
+    assert b.positions()["MES"]["qty"] == 1
+    assert b.account()["equity"] == 55_000.0 and b.account()["estimated"] is True
+    b.flatten("MES")
+    assert b.positions() == {}
+    # a real URL builds a TradersPost-compatible payload (POST captured)
+    captured = {}
+    def fake_post(self, payload):
+        captured.update(payload); return "sent[200]"
+    orig = brk.WebhookBroker._post
+    brk.WebhookBroker._post = fake_post
+    try:
+        b2 = brk.WebhookBroker("http://example.test", capital=50_000)
+        b2.connect()
+        res = b2.place_bracket("MNQ", 2, "SELL", entry=18000.0, stop=18050.0, target=17900.0)
+        assert res.status == "sent[200]"
+        assert captured["action"] == "sell" and captured["quantity"] == 2
+        assert captured["stopLoss"]["stopPrice"] == 18050.0
+        assert captured["takeProfit"]["limitPrice"] == 17900.0
+    finally:
+        brk.WebhookBroker._post = orig
+
+
 def test_funded_lucid_preset_and_eod_trailing():
     from qflow.funded import FundedAccount, LUCID_PRESETS
     fa = FundedAccount.from_lucid(50)

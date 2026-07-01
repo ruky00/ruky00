@@ -68,6 +68,17 @@ class BrokerAdapter:
     def cancel_all(self, symbol=None): ...
     def flatten(self, symbol=None): ...
 
+    # Broker-agnostic helpers so the live loop never touches a broker-specific
+    # attribute (e.g. IBKR's .ib). Overridden where a broker can do better.
+    def sleep(self, seconds: float):
+        """Wait, pumping the broker's event loop if it has one."""
+        import time
+        time.sleep(seconds)
+
+    def account_label(self) -> str:
+        """Short id for the header line (account number / broker name)."""
+        return self.name
+
 
 # --------------------------------------------------------------------------- #
 # Paper broker — in-memory, no dependencies (default / testing)
@@ -232,6 +243,15 @@ class IBKRBroker(BrokerAdapter):
     def is_connected(self):
         return self.ib is not None and self.ib.isConnected()
 
+    def sleep(self, seconds: float):
+        self.ib.sleep(seconds)                 # pump the ib_insync event loop
+
+    def account_label(self) -> str:
+        try:
+            return ",".join(self.ib.managedAccounts()) or self.name
+        except Exception:
+            return self.name
+
     def _contract(self, symbol):
         from ib_insync import Stock
         if self.primary_exchange:
@@ -326,3 +346,125 @@ class IBKRBroker(BrokerAdapter):
             action = "SELL" if p.position > 0 else "BUY"
             from ib_insync import MarketOrder
             self.ib.placeOrder(p.contract, MarketOrder(action, abs(p.position)))
+
+
+# --------------------------------------------------------------------------- #
+# Webhook broker — the easiest live connector (routes orders over HTTP)
+# --------------------------------------------------------------------------- #
+class WebhookBroker(BrokerAdapter):
+    """
+    Route orders to any webhook that accepts a JSON alert — the simplest way to
+    reach a **futures prop firm like Lucid** without a native API integration.
+
+    The typical path is:  bot  ->  WebhookBroker (HTTP POST)  ->  TradersPost /
+    CrossTrade  ->  Tradovate  ->  Lucid. You paste the bridge's webhook URL and
+    the bot fires TradersPost-compatible payloads (buy / sell / exit with an
+    optional stop-loss + take-profit that then live at the broker).
+
+    IMPORTANT — this is a **one-way order router**: a plain webhook cannot report
+    fills, positions or equity back. So this adapter *shadow-tracks* what it sent
+    (like PaperBroker) purely to keep the bot loop, journal and funded engine
+    running; the real account truth lives on the Lucid dashboard until you add a
+    two-way API adapter (Tradovate). Stops/targets are enforced by the broker, not
+    here, so the shadow book won't auto-close on a stop — treat its equity as an
+    estimate. Uses only the standard library (urllib); no extra dependency.
+    """
+    name = "webhook"
+
+    def __init__(self, webhook_url: str, capital: float = 50_000.0,
+                 timeout: float = 10.0, dry_run: bool = False):
+        if not webhook_url and not dry_run:
+            raise ValueError("WebhookBroker needs a webhook_url (or dry_run=True).")
+        self.url = webhook_url
+        self.timeout = timeout
+        self.dry_run = dry_run
+        self._capital = capital
+        self._positions: dict[str, dict] = {}
+        self._connected = False
+        self._seq = 0
+
+    # ----- lifecycle ----- #
+    def connect(self):
+        self._connected = True
+        return self
+
+    def disconnect(self):
+        self._connected = False
+
+    def is_connected(self):
+        return self._connected
+
+    def account_label(self) -> str:
+        return "webhook" + (" (dry-run)" if self.dry_run else "")
+
+    # ----- readback (shadow, estimated) ----- #
+    def account(self) -> dict:
+        mkt = sum(p["qty"] * p["entry"] for p in self._positions.values())
+        return {"cash": round(self._capital, 2), "positions_value": round(mkt, 2),
+                "equity": round(self._capital + mkt, 2), "estimated": True}
+
+    def positions(self) -> dict:
+        return {s: {"qty": p["qty"], "entry": p["entry"]}
+                for s, p in self._positions.items()}
+
+    # ----- HTTP ----- #
+    def _post(self, payload: dict) -> str:
+        """POST the JSON alert; return a short status string (never raises)."""
+        if self.dry_run:
+            return "dry-run"
+        import json
+        import urllib.request
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(self.url, data=data,
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                return f"sent[{r.status}]"
+        except Exception as e:                       # network / HTTP error
+            return f"error[{type(e).__name__}]"
+
+    # ----- orders ----- #
+    def place_bracket(self, symbol, qty, side, entry, stop, target,
+                      entry_type="MKT") -> BracketResult:
+        self._seq += 1
+        payload = {
+            "ticker": symbol,
+            "action": "buy" if side.upper() == "BUY" else "sell",
+            "price": round(entry, 4),
+            "quantity": qty,
+            "takeProfit": {"limitPrice": round(target, 4)},
+            "stopLoss": {"type": "stop", "stopPrice": round(stop, 4)},
+        }
+        status = self._post(payload)
+        direction = 1 if side.upper() == "BUY" else -1
+        self._positions[symbol] = {"qty": qty * direction, "entry": entry,
+                                   "stop": stop, "target": target}
+        return BracketResult(order_id=f"WH-{self._seq}", symbol=symbol,
+                             side=side.upper(), qty=qty, entry=entry, stop=stop,
+                             target=target, status=status, broker=self.name)
+
+    def place_market(self, symbol, qty, side, price=0.0) -> BracketResult:
+        self._seq += 1
+        status = self._post({"ticker": symbol,
+                             "action": "buy" if side.upper() == "BUY" else "sell",
+                             "quantity": qty, "price": round(price, 4)})
+        direction = 1 if side.upper() == "BUY" else -1
+        cur = self._positions.get(symbol, {"qty": 0.0, "entry": price})
+        new_qty = cur["qty"] + qty * direction
+        if abs(new_qty) < 1e-9:
+            self._positions.pop(symbol, None)
+        else:
+            self._positions[symbol] = {"qty": new_qty, "entry": price or cur["entry"],
+                                       "stop": 0.0, "target": 0.0}
+        return BracketResult(order_id=f"WH-{self._seq}", symbol=symbol,
+                             side=side.upper(), qty=qty, entry=price, stop=0.0,
+                             target=0.0, status=status, broker=self.name)
+
+    def cancel_all(self, symbol=None):
+        self.flatten(symbol)
+
+    def flatten(self, symbol=None):
+        syms = [symbol] if symbol else list(self._positions)
+        for s in syms:
+            self._post({"ticker": s, "action": "exit"})
+            self._positions.pop(s, None)

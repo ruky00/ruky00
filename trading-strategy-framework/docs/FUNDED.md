@@ -90,33 +90,64 @@ stores each symbol's chosen (strategy, interval) with a timestamp and reuses it
 until `--reselect-hours` (default 24) elapses, then re-runs the walk-forward and
 rewrites the cache.
 
-## Next steps — connecting to a real Lucid account
+## Connecting to a real Lucid account
 
 **Important:** Lucid is a **futures** prop firm. It does **not** use Interactive
 Brokers. It runs on futures data feeds (**Rithmic** / **CQG**) and platforms
-(NinjaTrader, Tradovate, TradingView, Quantower, Sierra Chart). The current bot
-speaks to IBKR (equities), so connecting to Lucid needs a futures execution path
-and futures instruments. Concretely:
+(NinjaTrader, Tradovate, TradingView, Quantower, Sierra Chart). Connecting needs a
+futures execution path and futures instruments.
 
-1. **Pick the connection.**
-   - **Tradovate API** (REST + WebSocket) — LucidFlex uses the Tradovate data
-     connection and Tradovate has a documented API; best fit for native Python.
-   - **Webhook bridge** (TradersPost / CrossTrade) — lowest-code: the bot POSTs a
-     signal and the bridge routes the order into Tradovate/NinjaTrader. Good for a
-     first integration.
-   - **Rithmic API** (R|Protocol, protobuf) — used by NinjaTrader/LucidBlack; more
-     work but the most direct fills.
-2. **Add a broker adapter** next to `IBKRBroker` (`qflow/broker.py`) implementing
-   the same interface (`connect`, `account`, `positions`, `place_bracket`,
-   `flatten`, `cancel_all`) — e.g. `TradovateBroker` or `WebhookBroker`. The bot
-   loop, funded engine, journal and selection are broker-agnostic and reuse as-is.
-3. **Switch the universe to futures.** Trade `MES`/`MNQ` (micros) or `ES`/`NQ`,
-   pull 5-minute futures bars, and **size in contracts** using each contract's
-   tick value and the dollar risk (`FundedAccount.risk_fraction()` × equity ÷
-   per-contract stop $), not share notional. This replaces the equity `size()`.
-4. **Validate first.** Run `--auto-select --lucid <size>` on the **evaluation /
-   paper** account for 2–4 weeks, watch the journal's win-rate/expectancy and the
-   exam status, and only then take a funded account at minimum size.
+Three ways to reach it, easiest first:
 
-The discipline gate still applies: green paper ≠ profitable — it means the machine
-works. See [`ROADMAP.md`](ROADMAP.md).
+| Connector | Effort | Fills/equity back? | Status |
+|---|---|---|---|
+| **Webhook bridge** (TradersPost / CrossTrade → Tradovate) | lowest | no (one-way) | ✅ built: `WebhookBroker` |
+| **Tradovate API** (REST + WebSocket) | medium | yes | next |
+| **Rithmic API** (R\|Protocol, protobuf) | high | yes | later |
+
+### The easy connector (built): `WebhookBroker`
+
+`qflow/broker.py`'s `WebhookBroker` POSTs TradersPost-compatible JSON
+(`buy`/`sell`/`exit` with `stopLoss`/`takeProfit`) to a bridge URL, which routes
+the order into your Tradovate/Lucid account. It reuses the whole bot unchanged —
+only `--broker webhook` and a URL differ.
+
+> One-way limitation: a plain webhook can't report fills/positions/equity back, so
+> `WebhookBroker` *shadow-tracks* what it sent to keep the bot/journal/funded
+> engine running. Treat its equity as an estimate — the real truth is the Lucid
+> dashboard until the Tradovate API adapter (two-way) lands.
+
+Setup steps:
+
+1. Make a Lucid **evaluation/demo** account and connect it to **Tradovate**.
+2. Create a **TradersPost** (or CrossTrade) account, connect it to that Tradovate
+   account, and create a strategy — it gives you a **webhook URL**.
+3. Map the symbols you'll trade (e.g. `MES`, `MNQ`) in TradersPost.
+4. Dry-run first (builds payloads, sends nothing), then go live:
+
+```bash
+# 1) inspect the payloads without sending
+python bot/intraday_bot.py --broker webhook --webhook-url "https://webhooks.traderspost.io/..." \
+    --lucid 50 --symbols MES,MNQ --fixed-qty 1 --journal logs/lucid.csv --webhook-dry-run
+
+# 2) same command without --webhook-dry-run to actually route orders to Lucid
+```
+
+Use `--fixed-qty` to send a fixed number of **contracts** (futures are sized in
+contracts, not shares, so the equity/ATR share-sizer is bypassed for now).
+
+### Then: two-way Tradovate API (next)
+
+Add a `TradovateBroker` next to `IBKRBroker` implementing the same interface
+(`connect`, `account`, `positions`, `place_bracket`, `flatten`, `cancel_all`)
+using Tradovate's REST + WebSocket. That gives real fills/positions/equity back so
+the funded engine tracks the true account, and proper **contract sizing** by tick
+value (`FundedAccount.risk_fraction()` × equity ÷ per-contract stop $) replacing
+the equity `size()`.
+
+### Validate first
+
+Run `--broker webhook --lucid <size>` on the **evaluation/demo** account for 2–4
+weeks, watch the journal's win-rate/expectancy and the exam status line, and only
+then take a funded account at minimum size. Green paper ≠ profitable — it means
+the machine works. See [`ROADMAP.md`](ROADMAP.md).
