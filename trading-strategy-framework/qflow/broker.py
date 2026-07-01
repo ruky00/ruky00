@@ -165,7 +165,7 @@ class IBKRBroker(BrokerAdapter):
 
     def __init__(self, host="127.0.0.1", port=7497, client_id=1,
                  allow_live=False, exchange="SMART", currency="USD",
-                 primary_exchange=""):
+                 primary_exchange="", tif="GTC", outside_rth=True):
         if port in _LIVE_PORTS and not allow_live:
             raise ValueError(
                 f"Port {port} is a LIVE trading port. Pass allow_live=True to "
@@ -174,6 +174,12 @@ class IBKRBroker(BrokerAdapter):
         self.exchange, self.currency = exchange, currency
         # e.g. 'BM' (Bolsa de Madrid) for Spanish stocks with SMART routing
         self.primary_exchange = primary_exchange
+        # Exit-leg time-in-force. If your IBKR account has an order preset that
+        # forces DAY, GTC exits trigger warning 10349 and the bracket is
+        # CANCELLED — set tif="DAY" to match the preset (or remove the preset in
+        # Gateway to keep GTC stops that survive overnight).
+        self.tif = tif
+        self.outside_rth = outside_rth        # let orders rest before the open
         self.ib = None
 
     def connect(self):
@@ -231,15 +237,19 @@ class IBKRBroker(BrokerAdapter):
         parent = (MarketOrder(action, qty) if entry_type == "MKT"
                   else LimitOrder(action, qty, entry))
         parent.transmit = False
-        # exit legs are Good-Till-Cancelled so a swing trade's stop/target don't
-        # expire at the daily close (IBKR account presets may still override this).
+        parent.outsideRth = self.outside_rth
+        # exit-leg TIF (default GTC so a swing stop/target survive overnight). If
+        # the account preset forces DAY, GTC triggers error 10349 + cancellation —
+        # pass tif="DAY" to match the preset (see IBKRBroker docstring).
         tp = LimitOrder(exit_action, qty, target)
         tp.parentId = 0          # set after parent has an id
-        tp.tif = "GTC"
+        tp.tif = self.tif
+        tp.outsideRth = self.outside_rth
         tp.transmit = False
         sl = StopOrder(exit_action, qty, stop)
         sl.parentId = 0
-        sl.tif = "GTC"
+        sl.tif = self.tif
+        sl.outsideRth = self.outside_rth
         sl.transmit = True       # last leg transmits the whole group
 
         oca = f"oca-{symbol}-{int(entry*100)}"

@@ -58,6 +58,8 @@ def main():
     ap.add_argument("--ibkr-host", default="127.0.0.1")
     ap.add_argument("--ibkr-allow-live", action="store_true",
                     help="required to connect to a LIVE port (real money)")
+    ap.add_argument("--ibkr-tif", default="GTC", choices=["GTC", "DAY"],
+                    help="exit-leg time-in-force; DAY if your preset forces DAY")
     ap.add_argument("--broker-symbol", default="",
                     help="IBKR ticker if it differs from the data symbol "
                          "(e.g. data SAN.MC on yahoo -> broker SAN)")
@@ -109,7 +111,7 @@ def main():
         broker_obj = brk.IBKRBroker(host=args.ibkr_host, port=args.ibkr_port,
                                     allow_live=args.ibkr_allow_live,
                                     currency=args.currency, exchange=args.exchange,
-                                    primary_exchange=args.primary)
+                                    primary_exchange=args.primary, tif=args.ibkr_tif)
 
     kw = dict(symbol=args.symbol, source=args.source, strategy=args.strategy,
               capital=args.capital, risk_per_trade=args.risk,

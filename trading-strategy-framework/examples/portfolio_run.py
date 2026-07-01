@@ -46,6 +46,9 @@ def main():
     ap.add_argument("--currency", default="USD")
     ap.add_argument("--exchange", default="SMART")
     ap.add_argument("--primary", default="")
+    ap.add_argument("--ibkr-tif", default="GTC", choices=["GTC", "DAY"],
+                    help="exit-leg time-in-force; use DAY if your account preset "
+                         "forces DAY (avoids error 10349 cancellations)")
     # risk
     ap.add_argument("--kill-switches", action="store_true")
     ap.add_argument("--max-daily-loss", type=float, default=0.03)
@@ -86,7 +89,7 @@ def main():
         broker_obj = brk.IBKRBroker(host=args.ibkr_host, port=args.ibkr_port,
                                     allow_live=args.ibkr_allow_live,
                                     currency=args.currency, exchange=args.exchange,
-                                    primary_exchange=args.primary)
+                                    primary_exchange=args.primary, tif=args.ibkr_tif)
 
     risk_limits = None
     if args.kill_switches:
