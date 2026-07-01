@@ -128,12 +128,42 @@ def test_portfolio_construct():
 
 def test_feeds_real_sample_offline():
     # bundled samples must load (network or committed fallback) & be canonical
-    df = feeds.from_github("AAPL")
-    assert list(df.columns) == ["open", "high", "low", "close", "volume"]
-    assert len(df) > 100
-    assert (df["high"] >= df["low"]).all()
-    assert df["volume"].notna().all()
-    assert df.index.is_monotonic_increasing
+    for sym in ("AAPL", "NVDA", "AMD"):        # AAPL dedicated file, NVDA/AMD from S&P set
+        df = feeds.from_github(sym)
+        assert list(df.columns) == ["open", "high", "low", "close", "volume"], sym
+        assert len(df) > 100, sym
+        assert (df["high"] >= df["low"]).all(), sym
+        assert df["volume"].notna().all(), sym
+        assert df.index.is_monotonic_increasing, sym
+
+
+def test_improved_strategy_params():
+    df = data.synthetic_ohlcv(1500, seed=13)
+    # new optional params must be accepted and still yield valid signals
+    tf = strategies.trend_following(df, fast=50, slow=200, vol_confirm=True)
+    assert "vol_confirm" in tf.params and tf.signal.isin([-1, 0, 1]).all()
+    mr = strategies.mean_reversion(df, pct_b_buy=0.05, bb_std=2.0)
+    assert "pct_b_buy" in mr.params and mr.signal.isin([-1, 0, 1]).all()
+    vb = strategies.volatility_breakout(df, squeeze=True, squeeze_lookback=20)
+    assert vb.params["squeeze"] is True and vb.signal.isin([-1, 0, 1]).all()
+    # squeeze filter should not increase trades vs no-squeeze (it's a gate)
+    vb_off = strategies.volatility_breakout(df, squeeze=False)
+    assert (vb.signal != 0).sum() <= (vb_off.signal != 0).sum() + 1
+
+
+def test_rolling_walk_forward():
+    df = data.synthetic_ohlcv(2200, seed=14)   # spans several calendar years
+    grid = {"rsi_buy": [5, 10], "rsi_exit": [55, 65]}
+    wf = optimize.rolling_walk_forward(df, "mean_reversion", grid,
+                                       train_years=2, test_years=1, min_trades=1,
+                                       bt_kwargs=dict(capital=10_000))
+    assert "oos_stats" in wf and wf["folds"]
+    # folds are chronological, each has fixed params from its train window
+    yrs = [f["test_year"] for f in wf["folds"]]
+    assert yrs == sorted(yrs)
+    for f in wf["folds"]:
+        assert set(f["params"]) == set(grid)
+    assert np.isfinite(wf["oos_stats"]["OOS Sharpe"])
 
 
 def test_paper_trader_forward_and_idempotent(tmp_path=None):

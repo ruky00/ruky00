@@ -18,7 +18,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/data.py` | Regime-aware synthetic OHLCV generator + CSV loader |
 | `qflow/feeds.py` | **Real** market data — Binance / Stooq / Yahoo + bundled GitHub samples |
 | `qflow/indicators.py` | SMA, EMA, RSI, ATR, MACD, Bollinger, ADX, z-score |
-| `qflow/strategies.py` | Trend-following, mean-reversion, volatility-breakout |
+| `qflow/strategies.py` | Trend (EMA 50/200 + ADX + volume) · mean-reversion (RSI + Bollinger) · breakout (Donchian + ATR squeeze) · `auto` |
 | `qflow/backtest.py` | Bar-by-bar engine: risk-based sizing, costs, trade ledger |
 | `qflow/metrics.py` | CAGR, Sharpe, Sortino, Calmar, max DD, win rate, profit factor |
 | `qflow/risk.py` | Position sizing, R:R, expectancy, Kelly, ATR stops |
@@ -26,7 +26,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/multifactor.py` | Momentum + value + volatility + trend cross-sectional model |
 | `qflow/montecarlo.py` | Trade-bootstrap Monte-Carlo robustness analysis |
 | `qflow/portfolio.py` | Inverse-vol allocation + risk-tolerance overlay |
-| `qflow/optimize.py` | Grid search + **walk-forward** (out-of-sample) tuning |
+| `qflow/optimize.py` | Grid search + **walk-forward** + **rolling calendar walk-forward** |
 | `qflow/anomalies.py` | **Daily-edge scanner** — overnight, gaps, day-of-week, lead-lag |
 | `qflow/edge_lab.py` | **Repeatable-edge lab** — significance + consistency + OOS persistence |
 | `qflow/universe.py` | **Universe scanner** — sweep IBEX-35 / S&P-500 for robust patterns |
@@ -54,7 +54,8 @@ python examples/compare_strategies.py  # backtest all strategies on REAL data
 python examples/find_edges.py          # hunt daily inefficiencies + walk-forward tuning
 python examples/repeatable_edges.py    # rank patterns by year-to-year repeatability
 python examples/scan_universe.py       # scan a whole universe + España<->US dual listings
-python tests/test_framework.py         # 26 correctness tests
+python examples/walk_forward.py        # rolling calendar walk-forward (train N yrs -> test next)
+python tests/test_framework.py         # 34 correctness tests
 ```
 
 ### Finding daily edges & optimising
@@ -196,7 +197,7 @@ trading-strategy-framework/
 ├── qflow/            # the framework package (data, feeds, strategies, backtest, paper, ...)
 ├── examples/         # run_all · compare_strategies · find_edges · news_demo · paper_trade
 ├── tests/            # test_framework.py — 32 correctness checks
-├── data/samples/     # bundled REAL sample datasets (AAPL, TSLA)
+├── data/samples/     # bundled REAL data (AAPL, TSLA, NVDA, AMD, NFLX, AMZN, MSFT, GOOGL)
 ├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · BROKER · SETUP_IBKR · PORTFOLIO · PAPER_TRADING · DISCLAIMER
 ├── requirements.txt
 └── LICENSE           # MIT

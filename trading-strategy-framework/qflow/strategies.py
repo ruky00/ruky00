@@ -37,21 +37,31 @@ class StrategySignal:
 # --------------------------------------------------------------------------- #
 def trend_following(
     df: pd.DataFrame,
-    fast: int = 20,
-    slow: int = 50,
+    fast: int = 50,
+    slow: int = 200,
     adx_window: int = 14,
     adx_threshold: float = 20.0,
     atr_window: int = 14,
+    vol_window: int = 20,
+    vol_confirm: bool = True,
     allow_short: bool = True,
 ) -> StrategySignal:
-    """Go with the trend only when ADX confirms a real trend is present."""
+    """
+    Trend following = EMA cross (default 50/200 golden/death cross) confirmed by
+    ADX (real trend, not chop) and by *volume* (participation behind the move).
+    """
     ema_fast = ind.ema(df["close"], fast)
     ema_slow = ind.ema(df["close"], slow)
     adx = ind.adx(df, adx_window)
     atr = ind.atr(df, atr_window)
 
-    long = (ema_fast > ema_slow) & (adx > adx_threshold)
-    short = (ema_fast < ema_slow) & (adx > adx_threshold)
+    if vol_confirm:
+        vol_ok = df["volume"] > ind.sma(df["volume"], vol_window)
+    else:
+        vol_ok = pd.Series(True, index=df.index)
+
+    long = (ema_fast > ema_slow) & (adx > adx_threshold) & vol_ok
+    short = (ema_fast < ema_slow) & (adx > adx_threshold) & vol_ok
 
     signal = pd.Series(0, index=df.index)
     signal[long] = 1
@@ -61,7 +71,8 @@ def trend_following(
         signal=signal,
         atr=atr,
         params=dict(fast=fast, slow=slow, adx_window=adx_window,
-                    adx_threshold=adx_threshold, atr_window=atr_window),
+                    adx_threshold=adx_threshold, atr_window=atr_window,
+                    vol_window=vol_window, vol_confirm=vol_confirm),
     )
 
 
@@ -75,19 +86,23 @@ def mean_reversion(
     rsi_exit: float = 55.0,
     trend_window: int = 200,
     bb_window: int = 20,
+    bb_std: float = 2.0,
+    pct_b_buy: float = 0.05,
     atr_window: int = 14,
 ) -> StrategySignal:
     """
-    Buy short-term oversold dips *inside* a longer-term uptrend (classic
-    Connors-style 2-period RSI), exit on mean reversion back to the middle.
+    Buy short-term oversold dips *inside* a longer-term uptrend: enter when a
+    2-period RSI is washed out OR price pierces the lower Bollinger band
+    (%B < pct_b_buy), but only above the 200-SMA trend filter. Exit on reversion
+    back toward the middle band / RSI recovery. ATR drives risk sizing.
     """
     rsi = ind.rsi(df["close"], rsi_window)
     trend = ind.sma(df["close"], trend_window)
     atr = ind.atr(df, atr_window)
-    _, _, _, pct_b = ind.bollinger(df["close"], bb_window)
+    _, _, _, pct_b = ind.bollinger(df["close"], bb_window, bb_std)
 
     uptrend = df["close"] > trend
-    enter = uptrend & (rsi < rsi_buy)
+    enter = uptrend & ((rsi < rsi_buy) | (pct_b < pct_b_buy))
     exit_ = (rsi > rsi_exit) | (pct_b > 0.8)
 
     signal = pd.Series(float("nan"), index=df.index)
@@ -98,8 +113,8 @@ def mean_reversion(
         signal=signal,
         atr=atr,
         params=dict(rsi_window=rsi_window, rsi_buy=rsi_buy, rsi_exit=rsi_exit,
-                    trend_window=trend_window, bb_window=bb_window,
-                    atr_window=atr_window),
+                    trend_window=trend_window, bb_window=bb_window, bb_std=bb_std,
+                    pct_b_buy=pct_b_buy, atr_window=atr_window),
     )
 
 
@@ -112,15 +127,18 @@ def volatility_breakout(
     exit_channel: int = 20,
     atr_window: int = 14,
     vol_filter: int = 100,
+    squeeze: bool = True,
+    squeeze_lookback: int = 20,
+    bb_window: int = 20,
     allow_short: bool = True,
 ) -> StrategySignal:
     """
-    Turtle-style breakout: enter on a new N-day high/low, ride momentum, exit
-    on the opposite shorter channel. A volatility-expansion filter avoids
-    chopping inside dead ranges.
+    Donchian breakout with a volatility *squeeze* precondition: only take a new
+    N-day closing high/low when (a) ATR is expanding above its median AND (b)
+    volatility was recently *compressed* (Bollinger band-width below its median in
+    the last `squeeze_lookback` bars) — the classic coiled-spring setup. Exit on
+    the opposite shorter channel.
     """
-    # Break out on a new N-day *closing* high/low (more tradeable than the
-    # max-of-highs, which the close rarely exceeds).
     upper = df["close"].rolling(channel).max()
     lower = df["close"].rolling(channel).min()
     exit_up = df["close"].rolling(exit_channel).max()
@@ -129,8 +147,17 @@ def volatility_breakout(
     atr_med = atr.rolling(vol_filter).median()
     expanding = atr > atr_med  # only trade when vol is above its own median
 
-    long_entry = ((df["close"] >= upper.shift(1)) & expanding).values
-    short_entry = ((df["close"] <= lower.shift(1)) & expanding).values
+    if squeeze:
+        mid, up_bb, lo_bb, _ = ind.bollinger(df["close"], bb_window)
+        bb_width = (up_bb - lo_bb) / mid.replace(0, float("nan"))
+        was_squeezed = bb_width < bb_width.rolling(vol_filter).median()
+        # a squeeze occurred within the recent lookback -> spring is coiled
+        recently_squeezed = was_squeezed.rolling(squeeze_lookback).max().fillna(0).astype(bool)
+    else:
+        recently_squeezed = pd.Series(True, index=df.index)
+
+    long_entry = ((df["close"] >= upper.shift(1)) & expanding & recently_squeezed).values
+    short_entry = ((df["close"] <= lower.shift(1)) & expanding & recently_squeezed).values
     long_exit = (df["close"] <= exit_dn.shift(1)).values
     short_exit = (df["close"] >= exit_up.shift(1)).values
 
@@ -156,7 +183,9 @@ def volatility_breakout(
         signal=signal,
         atr=atr,
         params=dict(channel=channel, exit_channel=exit_channel,
-                    atr_window=atr_window, vol_filter=vol_filter),
+                    atr_window=atr_window, vol_filter=vol_filter,
+                    squeeze=squeeze, squeeze_lookback=squeeze_lookback,
+                    bb_window=bb_window),
     )
 
 

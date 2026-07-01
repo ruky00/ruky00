@@ -35,13 +35,24 @@ CANONICAL = ["open", "high", "low", "close", "volume"]
 DEFAULT_CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 # Bundled real sample datasets (daily OHLCV) hosted on GitHub.
+# value = (url, colmap, name_filter). name_filter selects one ticker's rows from a
+# multi-ticker file (the S&P-500 5-year set). Newer names (COIN, PLTR) and 10-year
+# history are not available offline here — use source="yahoo" on an open network.
+_SP500 = "https://raw.githubusercontent.com/plotly/datasets/master/all_stocks_5yr.csv"
 GITHUB_SAMPLES = {
     "AAPL": ("https://raw.githubusercontent.com/plotly/datasets/master/finance-charts-apple.csv",
              {"date": "Date", "open": "AAPL.Open", "high": "AAPL.High",
-              "low": "AAPL.Low", "close": "AAPL.Close", "volume": "AAPL.Volume"}),
+              "low": "AAPL.Low", "close": "AAPL.Close", "volume": "AAPL.Volume"}, None),
     "TSLA": ("https://raw.githubusercontent.com/plotly/datasets/master/tesla-stock-price.csv",
              {"date": "date", "open": "open", "high": "high",
-              "low": "low", "close": "close", "volume": "volume"}),
+              "low": "low", "close": "close", "volume": "volume"}, None),
+    # S&P-500 five-year set (2013-2018), full OHLCV, selected by ticker name
+    "NVDA": (_SP500, None, "NVDA"),
+    "AMD":  (_SP500, None, "AMD"),
+    "NFLX": (_SP500, None, "NFLX"),
+    "AMZN": (_SP500, None, "AMZN"),
+    "MSFT": (_SP500, None, "MSFT"),
+    "GOOGL": (_SP500, None, "GOOGL"),
 }
 
 _HEADERS = {"User-Agent": "qflow/0.1 (research)"}
@@ -116,20 +127,24 @@ def _normalise(df: pd.DataFrame, colmap: dict | None = None) -> pd.DataFrame:
 # per-source loaders
 # --------------------------------------------------------------------------- #
 def from_github(symbol: str) -> pd.DataFrame:
-    """Fetch a bundled real sample from GitHub, falling back to the committed
-    copy under data/samples/ when the network is unavailable (sandboxed CI)."""
-    if symbol.upper() not in GITHUB_SAMPLES:
+    """Load a bundled real sample. Prefers the committed copy under
+    data/samples/<SYM>.csv (offline-first, and avoids re-downloading the 30 MB
+    multi-ticker file); only fetches from GitHub when the local file is missing,
+    applying the per-ticker name filter."""
+    sym = symbol.upper()
+    if sym not in GITHUB_SAMPLES:
         raise KeyError(f"No bundled sample for {symbol!r}. Available: {list(GITHUB_SAMPLES)}")
-    url, colmap = GITHUB_SAMPLES[symbol.upper()]
-    try:
-        raw = _http_get(url)
-        return _normalise(pd.read_csv(io.BytesIO(raw)), colmap)
-    except ConnectionError:
-        local = os.path.join(DEFAULT_CACHE, "samples", f"{symbol.upper()}.csv")
-        if os.path.exists(local):
-            df = pd.read_csv(local, parse_dates=["date"]).set_index("date")
-            return df[CANONICAL]
-        raise
+    local = os.path.join(DEFAULT_CACHE, "samples", f"{sym}.csv")
+    if os.path.exists(local):
+        df = pd.read_csv(local, parse_dates=["date"]).set_index("date")
+        return df[CANONICAL]
+
+    url, colmap, name_filter = GITHUB_SAMPLES[sym]
+    raw = _http_get(url)
+    df = pd.read_csv(io.BytesIO(raw))
+    if name_filter is not None:
+        df = df[df["Name"] == name_filter]
+    return _normalise(df, colmap)
 
 
 def from_binance(symbol: str = "BTCUSDT", interval: str = "1d", limit: int = 1000) -> pd.DataFrame:

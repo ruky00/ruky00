@@ -146,6 +146,108 @@ def walk_forward(df: pd.DataFrame,
     return {"folds": folds, "oos_stats": oos_stats, "oos_equity": oos_equity}
 
 
+def _cast_params(param_grid, best_row):
+    out = {}
+    for k in param_grid:
+        v = best_row[k]
+        if isinstance(v, bool):
+            out[k] = bool(v)
+        else:
+            try:
+                out[k] = int(v) if float(v).is_integer() else float(v)
+            except (TypeError, ValueError):
+                out[k] = v
+    return out
+
+
+def rolling_walk_forward(df: pd.DataFrame,
+                         strategy_name: str,
+                         param_grid: dict,
+                         train_years: int = 4,
+                         test_years: int = 1,
+                         metric: str = "sharpe_calmar",
+                         min_trades: int = 3,
+                         warmup_bars: int = 260,
+                         capital: float = 10_000.0,
+                         bt_kwargs: dict | None = None) -> dict:
+    """
+    Rolling **calendar-year** walk-forward — the robust validation you described:
+
+        train 2014-2017 -> test 2018
+        train 2015-2018 -> test 2019
+        train 2016-2019 -> test 2020   ... (roll forward one year at a time)
+
+    Each fold optimises the parameters on the trailing ``train_years`` years and
+    trades the next ``test_years`` year with those fixed params. The out-of-sample
+    years are chained into one continuous equity curve — that is the number to
+    trust, not the in-sample fit.
+    """
+    bt_kwargs = dict(bt_kwargs or {})
+    years = sorted(int(y) for y in pd.unique(df.index.year))
+    folds, oos_returns = [], []
+    start_equity = capital
+
+    for test_year in years:
+        train = df[(df.index.year >= test_year - train_years) & (df.index.year < test_year)]
+        test = df[(df.index.year >= test_year) & (df.index.year <= test_year + test_years - 1)]
+        if len(train) < 200 or len(test) < 20:
+            continue
+
+        ranked = grid_search(train, strategy_name, param_grid, metric,
+                             min_trades, bt_kwargs)
+        if ranked.empty:
+            continue
+        best = _cast_params(param_grid, ranked.iloc[0])
+
+        # evaluate on the test year with an indicator warmup carried in
+        t0 = df.index.get_loc(test.index[0])
+        wu = df.iloc[max(0, t0 - warmup_bars):df.index.get_loc(test.index[-1]) + 1]
+        res = _run(wu, strategy_name, best, {**bt_kwargs, "capital": start_equity})
+        test_eq = res.equity.loc[test.index[0]:test.index[-1]]
+        if len(test_eq) < 2:
+            continue
+        oos_returns.append(test_eq.pct_change().fillna(0.0))
+        start_equity = float(test_eq.iloc[-1])
+        folds.append({
+            "test_year": test_year,
+            "train": f"{train.index[0].year}-{train.index[-1].year}",
+            "params": best,
+            "oos_return": float(test_eq.iloc[-1] / test_eq.iloc[0] - 1.0),
+        })
+
+    if not oos_returns:
+        return {"error": "not enough calendar years for this configuration"}
+    oos_ret = pd.concat(oos_returns)
+    oos_equity = capital * (1 + oos_ret).cumprod()
+    return {
+        "folds": folds,
+        "oos_stats": {
+            "OOS CAGR": metrics.cagr(oos_equity),
+            "OOS Sharpe": metrics.sharpe(oos_ret),
+            "OOS Sortino": metrics.sortino(oos_ret),
+            "OOS Max Drawdown": metrics.max_drawdown(oos_equity),
+            "OOS Total Return": metrics.total_return(oos_equity),
+        },
+        "oos_equity": oos_equity,
+    }
+
+
+def report_rolling(wf: dict) -> str:
+    if "error" in wf:
+        return f"rolling walk-forward: {wf['error']}"
+    lines = ["Rolling walk-forward (train N years -> test next year)", "-" * 68]
+    for f in wf["folds"]:
+        lines.append(f"  train {f['train']} -> test {f['test_year']}  "
+                     f"OOS {f['oos_return']*100:+6.2f}%   params={f['params']}")
+    lines.append("-" * 68)
+    for k, v in wf["oos_stats"].items():
+        if "Return" in k or "CAGR" in k or "Drawdown" in k:
+            lines.append(f"  {k:<20} {v*100:>8.2f}%")
+        else:
+            lines.append(f"  {k:<20} {v:>9.2f}")
+    return "\n".join(lines)
+
+
 def report_walk_forward(wf: dict) -> str:
     if "error" in wf:
         return f"walk-forward: {wf['error']}"
