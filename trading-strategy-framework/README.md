@@ -61,7 +61,8 @@ python bot/intraday_bot.py --auto-select --funded --allow-short \
 | `qflow/news.py` | **News + sentiment** — provider-agnostic (RSS/Finnhub/Bloomberg/FinBERT) trade overlay |
 | `qflow/risk_governor.py` | **Kill-switches** — daily-loss / drawdown / heat / streak circuit breakers |
 | `qflow/funded.py` | **Funded-exam engine** — profit target + daily-loss / drawdown limits with greedy-but-capped dynamic sizing |
-| `qflow/intraday_select.py` | **Autonomous picker** — walk-forwards the intraday strategies across intervals, keeps the best OOS |
+| `qflow/intraday_select.py` | **Autonomous picker** — walk-forwards the intraday strategies across intervals, keeps the best OOS (+ cache) |
+| `qflow/journal.py` | **Trade journal** — append-only CSV of entries/exits → live win-rate / expectancy |
 | `qflow/broker.py` | **Execution** — PaperBroker + IBKRBroker (native bracket orders) |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
 | `qflow/portfolio_runner.py` | **Basket runner** — one strategy across many symbols, shared IBKR session |
@@ -88,7 +89,7 @@ python examples/research/walk_forward.py        # rolling calendar walk-forward 
 python examples/research/select_portfolio.py    # auto-filter a basket to robust (symbol, strategy) pairs
 python examples/research/backtest_intraday.py   # daily strategies on 5m bars (they lose to costs)
 python examples/research/intraday_lab.py        # intraday strategies: pick the interval + walk-forward
-python tests/test_framework.py         # 44 correctness tests
+python tests/test_framework.py         # 48 correctness tests
 ```
 
 ### Finding daily edges & optimising
@@ -233,9 +234,9 @@ trading-strategy-framework/
 ├── examples/
 │   ├── research/        # backtest · walk-forward · edge-finding · universe selection (the lab)
 │   └── live/            # daily-swing paper/portfolio runners + IBKR utilities
-├── tests/               # test_framework.py — 44 correctness checks
+├── tests/               # test_framework.py — 48 correctness checks
 ├── data/samples/        # bundled REAL data (AAPL, TSLA, NVDA, AMD, NFLX, AMZN, MSFT, GOOGL)
-├── docs/                # ROADMAP · PLAYBOOK · EDGES · PORTFOLIO · RISK · BROKER · SETUP_IBKR · PAPER_TRADING · NEWS · DISCLAIMER
+├── docs/                # ROADMAP · FUNDED · PLAYBOOK · EDGES · PORTFOLIO · RISK · BROKER · SETUP_IBKR · PAPER_TRADING · NEWS · DISCLAIMER
 ├── requirements.txt
 └── LICENSE              # MIT
 ```

@@ -49,7 +49,8 @@ warnings.filterwarnings("ignore")
 
 from qflow import feeds, strategies, intraday_select, broker as brk
 from qflow.risk_governor import RiskGovernor
-from qflow.funded import FundedAccount
+from qflow.funded import FundedAccount, LUCID_PRESETS
+from qflow.journal import TradeJournal
 
 
 def size(capital, risk, atr, stop_atr, price):
@@ -60,26 +61,36 @@ def size(capital, risk, atr, stop_atr, price):
     return max(1, qty)
 
 
-def build_plan(symbols, default_name, default_interval, auto_select):
+def build_plan(symbols, default_name, default_interval, auto_select,
+               cache_path=None, reselect_hours=24.0):
     """
     Decide, per symbol, which (strategy, interval) to trade.
 
     With --auto-select the bot is self-sufficient: it pulls ~60d of 5-minute bars
     and walk-forwards the intraday strategies across 5m/15m/30m, keeping the best
-    out-of-sample (strategy, interval). If nothing clears the bar (or data is
-    missing) it falls back to the CLI default. Returns {sym: (name, fn, interval)}.
+    out-of-sample (strategy, interval). With a cache path it reuses a fresh choice
+    instead of re-running the walk-forward each startup. If nothing clears the bar
+    (or data is missing) it falls back to the CLI default.
+    Returns {sym: (name, fn, interval)}.
     """
     plan = {}
     for sym in symbols:
         name, interval = default_name, default_interval
         if auto_select:
             try:
-                df = feeds.from_yahoo(sym, rng="60d", interval="5m")
-                choice = intraday_select.select_best(df, min_sharpe=0.0)
+                if cache_path:
+                    choice = intraday_select.select_cached(
+                        sym, lambda s=sym: feeds.from_yahoo(s, rng="60d", interval="5m"),
+                        cache_path=cache_path, max_age_hours=reselect_hours, min_sharpe=0.0)
+                    tag = " (cached)" if (choice and choice.get("cached")) else ""
+                else:
+                    choice = intraday_select.select_best(
+                        feeds.from_yahoo(sym, rng="60d", interval="5m"), min_sharpe=0.0)
+                    tag = ""
                 if choice:
                     name, interval = choice["strategy"], choice["interval"]
                     print(f"   auto-select {sym:<5} -> {name} @ {interval} "
-                          f"(OOS Sharpe {choice['oos_sharpe']:+.2f})")
+                          f"(OOS Sharpe {choice['oos_sharpe']:+.2f}){tag}")
                 else:
                     print(f"   auto-select {sym:<5} -> no intraday edge cleared the "
                           f"bar; using default {name} @ {interval}")
@@ -99,6 +110,13 @@ def main():
     ap.add_argument("--auto-select", action="store_true",
                     help="self-pick the best (strategy, interval) per symbol via "
                          "intraday walk-forward at startup (autonomous mode)")
+    ap.add_argument("--select-cache", default="",
+                    help="cache auto-select choices to this JSON (skip re-running "
+                         "the walk-forward while fresh)")
+    ap.add_argument("--reselect-hours", type=float, default=24.0,
+                    help="re-run auto-select when the cached choice is older than this")
+    ap.add_argument("--journal", default="",
+                    help="append every entry/exit to this CSV (live win-rate/expectancy)")
     ap.add_argument("--port", type=int, default=4002)
     ap.add_argument("--client-id", type=int, default=7)
     ap.add_argument("--capital", type=float, default=1_000_000.0)
@@ -114,10 +132,15 @@ def main():
     ap.add_argument("--funded", action="store_true",
                     help="enforce a prop-firm challenge: profit target + hard "
                          "daily-loss / total-drawdown limits with dynamic sizing")
+    ap.add_argument("--lucid", type=int, choices=sorted(LUCID_PRESETS),
+                    help="use a Lucid Trading preset (account size 25/50/100/150): "
+                         "sets target, EOD trailing drawdown and 50%% consistency")
     ap.add_argument("--profit-target", type=float, default=0.08)
     ap.add_argument("--max-total-drawdown", type=float, default=0.10)
-    ap.add_argument("--trailing-drawdown", action="store_true",
-                    help="measure total drawdown from the equity peak (else from start)")
+    ap.add_argument("--drawdown-mode", choices=["static", "trailing", "eod"],
+                    default="static", help="drawdown floor: fixed / intraday-peak / EOD-trailing")
+    ap.add_argument("--consistency", type=float, default=1.0,
+                    help="best-day <= this share of total profit (0.5 = Lucid eval; 1.0 = off)")
     ap.add_argument("--base-risk", type=float, default=0.004,
                     help="funded full-size risk per trade (scaled up/down by cushion)")
     ap.add_argument("--poll", type=int, default=60)
@@ -140,31 +163,47 @@ def main():
     print(f"🤖 INTRADAY BOT | {mode} | account {broker.ib.managedAccounts()} | {symbols}")
     if args.auto_select:
         print("   picking the best (strategy, interval) per symbol out-of-sample...")
-    plan = build_plan(symbols, args.strategy, args.interval, args.auto_select)
+    plan = build_plan(symbols, args.strategy, args.interval, args.auto_select,
+                      cache_path=args.select_cache or None,
+                      reselect_hours=args.reselect_hours)
 
     try:
         start_equity = float(broker.account().get("equity", args.capital))
     except Exception:
         start_equity = args.capital
 
+    jrn = TradeJournal(args.journal) if args.journal else None
+    if jrn:
+        print(f"   📓 journaling entries/exits to {args.journal}")
+
     fund = None
-    if args.funded:
+    if args.lucid:
+        fund = FundedAccount.from_lucid(args.lucid, consistency=args.consistency,
+                                        base_risk=args.base_risk)
+        fund.set_anchor(start_equity)     # trade the real account balance if it differs
+        R = fund.rules
+        dll = "none" if R["max_daily_loss"] >= 1 else f"{R['max_daily_loss']*100:.1f}%"
+        print(f"   💰 LUCID {args.lucid}K EXAM | target +{R['profit_target']*100:.1f}% | "
+              f"EOD-trailing DD {R['max_total_drawdown']*100:.1f}% | daily-loss {dll} | "
+              f"consistency {R['consistency_pct']*100:.0f}% | "
+              f"base risk {R['base_risk']*100:.2f}% (greedy, cushion-scaled)")
+    elif args.funded:
         fund = FundedAccount({"profit_target": args.profit_target,
                               "max_daily_loss": args.max_daily_loss,
                               "max_total_drawdown": args.max_total_drawdown,
-                              "trailing_drawdown": args.trailing_drawdown,
+                              "drawdown_mode": args.drawdown_mode,
+                              "consistency_pct": args.consistency,
                               "base_risk": args.base_risk},
                              start_equity=start_equity)
         print(f"   💰 FUNDED EXAM | target +{args.profit_target*100:.0f}% | "
               f"daily-loss {args.max_daily_loss*100:.0f}% | "
-              f"total-DD {args.max_total_drawdown*100:.0f}%"
-              f"{' (trailing)' if args.trailing_drawdown else ''} | "
+              f"total-DD {args.max_total_drawdown*100:.0f}% ({args.drawdown_mode}) | "
               f"base risk {args.base_risk*100:.2f}% (greedy, cushion-scaled)")
     else:
         print(f"   risk {args.risk*100:.2f}%/trade | SL {args.stop_atr}xATR / "
               f"TP {args.target_atr}xATR{' | kill-switches ON' if gov else ''}")
     print("   Ctrl+C to stop\n")
-    book = {}              # sym -> {side, qty, entry, sl, tp} for display
+    book = {}              # sym -> {side, qty, entry, sl, tp, strategy, interval} for display
     last_bar, trades = {}, 0
     start = time.time()
 
@@ -175,6 +214,11 @@ def main():
             eq = start_equity
         print(f"\n📊 SUMMARY | strategy {args.strategy} | entries {trades} | "
               f"start ${start_equity:,.0f} -> ${eq:,.0f} | P&L ${eq - start_equity:+,.0f}")
+        if jrn:
+            js = jrn.summary()
+            print(f"   📓 journal ({args.journal}): {js['exits']} closed | "
+                  f"win {js['win_rate']*100:.0f}% | avg win ${js['avg_win']:,.0f} / "
+                  f"avg loss ${js['avg_loss']:,.0f} | expectancy ${js['expectancy']:,.0f}/trade")
 
     try:
         while True:
@@ -213,8 +257,11 @@ def main():
                 atr = float(sig.atr.iloc[-2]) if sig.atr is not None else 0.0
                 price = float(df["close"].iloc[-1])
                 held = sym in positions and abs(positions[sym]["qty"]) > 0
-                if not held:
-                    book.pop(sym, None)                        # exited via SL/TP at IBKR
+                if not held and sym in book:
+                    bk = book.pop(sym)                         # exited via SL/TP at IBKR
+                    if jrn:
+                        signed = bk["qty"] if bk["side"] == "BUY" else -bk["qty"]
+                        jrn.log_exit(ts, sym, price, signed * (price - bk["entry"]))
 
                 # funded mode drives risk dynamically (greedy w/ cushion, throttled near limits)
                 risk = fund.risk_fraction() if fund else args.risk
@@ -243,6 +290,9 @@ def main():
                                 fund.on_open()
                             book[sym] = {"side": side, "qty": q, "entry": price,
                                          "sl": round(sl, 2), "tp": round(tp, 2)}
+                            if jrn:
+                                jrn.log_entry(ts, sym, side, q, price, round(sl, 2),
+                                              round(tp, 2), risk * 100, name, interval)
                             emoji = "🟢" if side == "BUY" else "🔴"
                             action = f"{emoji} {side} {q} @{risk*100:.2f}% [{res.status}]"
                 except Exception as e:
@@ -266,10 +316,11 @@ def main():
                   f"positions {len(positions)}  entries {trades}{halt}")
             if fund:
                 st = fund.status()
-                print(f"   💰 exam: profit {st['profit']:+.2f}%/{st['target']:.0f}%  "
-                      f"day-loss {st['day_loss']:.2f}%  total-DD {st['total_dd']:.2f}%  "
+                cons = "" if st["consistency_ok"] else "  ⚠️ consistency"
+                print(f"   💰 exam: profit {st['profit']:+.2f}%/{st['target']:.1f}%  "
+                      f"day-loss {st['day_loss']:.2f}%  DD-floor ${st['dd_floor']:,.0f}  "
                       f"cushion day/total {st['daily_cushion']:.0f}%/{st['total_cushion']:.0f}%  "
-                      f"days {st['trading_days']}/{st['min_days']}")
+                      f"days {st['trading_days']}/{st['min_days']}{cons}")
             print("\n".join(rows) + "\n")
 
             if args.minutes and (time.time() - start) > args.minutes * 60:

@@ -19,6 +19,10 @@ optimize, which imports strategies, which imports intraday_strategies).
 
 from __future__ import annotations
 
+import json
+import os
+import time
+
 from . import data, strategies, optimize
 
 # interval label -> (resample rule or None for native 5m, bars/day for annualising)
@@ -85,3 +89,49 @@ def select_best(df, min_sharpe=0.0, max_dd=-0.5, **kwargs):
         if r["oos_sharpe"] >= min_sharpe and r["oos_maxdd"] >= max_dd:
             return r
     return None
+
+
+def select_cached(symbol, loader, cache_path="logs/select_cache.json",
+                  max_age_hours=24.0, min_sharpe=0.0, **kwargs):
+    """
+    Cached selection: reuse a symbol's stored (strategy, interval) if it is fresh,
+    else re-run the walk-forward and persist the result.
+
+    Walk-forwarding every symbol on each startup is slow; caching lets the bot
+    re-select only on a schedule. `loader()` returns the symbol's 5m DataFrame
+    (called only on a cache miss / stale entry). Returns the choice dict (with a
+    "cached" flag and "chosen_at" timestamp) or None if no edge cleared the bar.
+    """
+    cache = _load_cache(cache_path)
+    entry = cache.get(symbol)
+    now = time.time()
+    if entry and (now - entry.get("chosen_at", 0)) < max_age_hours * 3600:
+        entry = dict(entry); entry["cached"] = True
+        return entry if entry.get("strategy") else None
+
+    choice = select_best(loader(), min_sharpe=min_sharpe, **kwargs)
+    record = dict(choice) if choice else {}
+    record["chosen_at"] = now
+    cache[symbol] = record
+    _save_cache(cache_path, cache)
+    if choice:
+        choice = dict(choice); choice["cached"] = False; choice["chosen_at"] = now
+    return choice
+
+
+def _load_cache(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_cache(path, cache):
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cache, f, indent=2)
+    os.replace(tmp, path)

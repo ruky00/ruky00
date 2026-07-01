@@ -37,7 +37,7 @@ and purpose.
   intraday momentum, and the `intraday_auto` combiner) with per-strategy
   parameter grids, an interval sweep (5m/15m/30m via `data.resample_ohlcv`) and
   intraday walk-forward (`examples/research/intraday_lab.py`).
-- 44 passing tests.
+- 48 passing tests.
 
 **The Funded Bot (product 2)**
 - `bot/intraday_bot.py`: runs qflow strategies on 5-minute bars, ATR SL/TP
@@ -62,8 +62,8 @@ and purpose.
 ## 🚀 Where we're going (next)
 
 **Short term — make the funded bot trustworthy**
-1. **Per-trade journal → CSV** for the bot (entry/exit/SL/TP/P&L per trade) to
-   review and compute live win-rate / expectancy.
+1. ✅ **Per-trade journal → CSV** (`qflow/journal.py`, `--journal`): entry/exit,
+   SL/TP, risk%, strategy/interval per trade → live win-rate / avg-win / expectancy.
 2. ✅ **Intraday backtester** on 5-minute bars with end-of-day flattening
    (`run_backtest(..., flatten_eod=True)`, `examples/research/backtest_intraday.py`).
    First finding: the daily strategies run *naively* on 5m bars **lose money**
@@ -77,11 +77,12 @@ and purpose.
    5m bars for the names the bot will trade.
 3. **Session controls**: auto-flat before the close, no new entries in the last
    30 min, max trades/day, max concurrent positions.
-4. ✅ **Funded-account rules engine** (`qflow/funded.py`, `bot/intraday_bot.py
-   --funded`): profit target + max daily loss + max total drawdown (static or
-   trailing) as hard limits, with greedy-but-capped dynamic sizing that de-risks
-   before it can breach and locks the pass at target. *Next:* per-trade journal
-   to CSV + min-trading-days pacing so the exam completes on schedule.
+4. ✅ **Funded-account rules engine** (`qflow/funded.py`, `--funded` / `--lucid`):
+   profit target + daily-loss + total-drawdown (static / trailing / **EOD
+   trailing**) + **consistency rule**, greedy-but-capped dynamic sizing that
+   de-risks before it can breach and locks the pass at target. Ships a **Lucid
+   Trading preset** (`FundedAccount.from_lucid`, 25/50/100/150K). See
+   [`FUNDED.md`](FUNDED.md).
 
 **Medium term — robustness & automation**
 5. **Real-time data path**: pull 5m bars from IBKR directly (not delayed Yahoo)
@@ -92,8 +93,11 @@ and purpose.
    intraday (symbol, strategy, interval) shortlist (`qflow/intraday_select.py`,
    `--auto-select`). *Next:* cache the selection to disk + re-select on a
    schedule instead of every startup.
-8. **Broker abstraction**: add Alpaca / ccxt adapters behind the same interface
-   (crypto runs 24/7 and has no PDT/borrow constraints — a natural funded-bot fit).
+8. **Futures broker for Lucid**: Lucid is a *futures* prop firm (Tradovate /
+   Rithmic / CQG — not IBKR). Add a `TradovateBroker` / `WebhookBroker` behind the
+   same interface, switch the universe to futures (MES/MNQ/ES/NQ) and size in
+   **contracts** (tick value) instead of shares. Also Alpaca / ccxt for equities /
+   crypto. See [`FUNDED.md`](FUNDED.md) → "connecting to a real Lucid account".
 
 **Longer term — edge & scale**
 9. Smarter execution (limit/adaptive orders, VWAP entries) to cut slippage.

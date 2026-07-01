@@ -138,6 +138,63 @@ def test_funded_target_latches_pass_and_daily_reset():
     assert fa.state.passed and not fa.can_open()[0]
 
 
+def test_funded_lucid_preset_and_eod_trailing():
+    from qflow.funded import FundedAccount, LUCID_PRESETS
+    fa = FundedAccount.from_lucid(50)
+    assert abs(fa.rules["profit_target"] - 3000 / 50000) < 1e-9   # $3k target on 50k
+    assert abs(fa.dd_amount() - 2000) < 1e-6                        # $2k trailing DD
+    assert fa.rules["drawdown_mode"] == "eod"
+    # EOD trailing: intraday highs do NOT move the floor; it trails at day close
+    fa.update(50_000, "2026-07-01")
+    assert fa.dd_floor() == 48_000
+    fa.update(51_000, "2026-07-01")                                # intraday high
+    assert fa.dd_floor() == 48_000                                  # floor unchanged mid-day
+    fa.update(51_000, "2026-07-02")                                # new day -> trails
+    assert fa.dd_floor() == 49_000
+
+
+def test_funded_consistency_blocks_one_giant_day():
+    from qflow.funded import FundedAccount
+    fa = FundedAccount.from_lucid(50, consistency=0.5)
+    fa.update(50_000, "2026-07-01"); fa.on_open()
+    fa.update(53_500, "2026-07-01")            # +$3.5k (> target) but 100% in one day
+    assert fa.profit() >= fa.rules["profit_target"]
+    assert not fa.consistency_ok()              # best day > 50% of total -> cannot pass
+    assert not fa.state.passed
+    assert not fa.can_open()[0]                 # and it stops banking more today
+
+
+def test_trade_journal_roundtrip(tmp_path=None):
+    import tempfile, os
+    from qflow.journal import TradeJournal
+    d = tmp_path or tempfile.mkdtemp()
+    j = TradeJournal(os.path.join(str(d), "j.csv"))
+    j.log_entry("2026-07-01T10:00:00", "NVDA", "BUY", 100, 1000.0, 990.0, 1020.0, 0.6, "vwap_reversion", "30m")
+    j.log_exit("2026-07-01T11:00:00", "NVDA", 1020.0, 2000.0, "target")
+    j.log_entry("2026-07-01T10:05:00", "AMD", "SELL", 50, 200.0, 204.0, 192.0, 0.4, "opening_range", "15m")
+    j.log_exit("2026-07-01T11:05:00", "AMD", 204.0, -200.0, "stop")
+    s = j.summary()
+    assert s["entries"] == 2 and s["exits"] == 2
+    assert s["win_rate"] == 0.5 and s["net_pnl"] == 1800.0 and s["expectancy"] == 900.0
+
+
+def test_select_cache_reuses_fresh_choice(tmp_path=None):
+    import tempfile, os
+    from qflow import intraday_select
+    d = tmp_path or tempfile.mkdtemp()
+    cache = os.path.join(str(d), "sel.json")
+    calls = {"n": 0}
+    def loader():
+        calls["n"] += 1
+        return data.synthetic_intraday(n_days=80, seed=6)
+    kw = dict(cache_path=cache, max_age_hours=24, min_sharpe=-99,
+              strats=["vwap_reversion"], intervals=["30m"])
+    c1 = intraday_select.select_cached("NVDA", loader, **kw)
+    c2 = intraday_select.select_cached("NVDA", loader, **kw)
+    assert c1 and c1["strategy"] == "vwap_reversion"
+    assert c2["cached"] is True and calls["n"] == 1      # 2nd call served from cache
+
+
 def test_intraday_autoselect_ranks_and_picks():
     df = data.synthetic_intraday(n_days=90, seed=4)
     from qflow import intraday_select
