@@ -165,13 +165,18 @@ class IBKRBroker(BrokerAdapter):
 
     def __init__(self, host="127.0.0.1", port=7497, client_id=1,
                  allow_live=False, exchange="SMART", currency="USD",
-                 primary_exchange="", tif="GTC", outside_rth=True):
+                 primary_exchange="", tif="GTC", outside_rth=True,
+                 market_data_type=3):
         if port in _LIVE_PORTS and not allow_live:
             raise ValueError(
                 f"Port {port} is a LIVE trading port. Pass allow_live=True to "
                 "trade real money — or use the paper port 7497.")
         self.host, self.port, self.client_id = host, port, client_id
         self.exchange, self.currency = exchange, currency
+        # 1 = real-time (needs a paid subscription), 3 = DELAYED (free, ~15 min),
+        # 4 = delayed-frozen. Without a real-time subscription, paper orders sit
+        # in PreSubmitted forever unless we tell IBKR to use delayed data.
+        self.market_data_type = market_data_type
         # e.g. 'BM' (Bolsa de Madrid) for Spanish stocks with SMART routing
         self.primary_exchange = primary_exchange
         # Exit-leg time-in-force. If your IBKR account has an order preset that
@@ -212,6 +217,12 @@ class IBKRBroker(BrokerAdapter):
                 "  2. Python 3.14 is not supported by ib_insync — use a 3.12 venv.\n"
                 "  3. IB Gateway not fully logged in / API not enabled (port 4002)."
             ) from e
+        # Use FREE delayed data if there's no real-time subscription, so paper
+        # orders actually fill instead of hanging in PreSubmitted.
+        try:
+            self.ib.reqMarketDataType(self.market_data_type)
+        except Exception:
+            pass
         return self
 
     def disconnect(self):
@@ -243,6 +254,12 @@ class IBKRBroker(BrokerAdapter):
         from ib_insync import MarketOrder, LimitOrder, StopOrder
         contract = self._contract(symbol)
         self.ib.qualifyContracts(contract)
+        # warm up a (delayed, free) price stream so the paper engine can fill
+        try:
+            self.ib.reqMktData(contract, "", False, False)
+            self.ib.sleep(1.5)
+        except Exception:
+            pass
         action = side.upper()
         exit_action = "SELL" if action == "BUY" else "BUY"
 
@@ -275,9 +292,17 @@ class IBKRBroker(BrokerAdapter):
         self.ib.placeOrder(contract, tp)
         self.ib.placeOrder(contract, sl)
 
+        # poll the real order status for a few seconds so callers see the truth
+        # (Filled / Cancelled / PreSubmitted / Submitted) instead of guessing
+        status = "Submitted"
+        for _ in range(8):
+            self.ib.sleep(0.5)
+            status = trade_parent.orderStatus.status or status
+            if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+                break
         return BracketResult(order_id=str(pid), symbol=symbol, side=action,
                              qty=qty, entry=entry, stop=stop, target=target,
-                             status="submitted", broker=self.name)
+                             status=status, broker=self.name)
 
     def place_market(self, symbol, qty, side, price=0.0) -> BracketResult:
         from ib_insync import MarketOrder
