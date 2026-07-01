@@ -104,7 +104,8 @@ class PaperTrader:
                  leader_source: str = "",
                  news_provider=None,
                  risk_limits: dict | None = None,
-                 broker=None):
+                 broker=None,
+                 broker_symbol: str = ""):
         if strategy not in ALL_STRATEGIES:
             raise ValueError(f"Unknown strategy {strategy!r}. "
                              f"Choose from {sorted(ALL_STRATEGIES)}.")
@@ -120,6 +121,7 @@ class PaperTrader:
         self._news_reason = ""
         self.governor = None                   # set after state is ready
         self.broker = broker                   # optional real execution
+        self.broker_symbol = broker_symbol or symbol   # IBKR ticker (may differ from data)
         self._live = False                     # True only inside step(); never in replay
         self.dir = os.path.join(root, f"{symbol}_{strategy}")
         os.makedirs(self.dir, exist_ok=True)
@@ -386,7 +388,7 @@ class PaperTrader:
         try:
             if not self.broker.is_connected():
                 self.broker.connect()
-            res = self.broker.place_bracket(self.symbol, qty=qty, side=side,
+            res = self.broker.place_bracket(self.broker_symbol, qty=qty, side=side,
                                             entry=entry, stop=stop, target=target)
             self._log(date, "BROKER", side, entry, qty,
                       f"{self.broker.name} order {res.order_id} ({res.status})", 0.0, mark)

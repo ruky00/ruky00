@@ -58,9 +58,20 @@ def main():
     ap.add_argument("--ibkr-host", default="127.0.0.1")
     ap.add_argument("--ibkr-allow-live", action="store_true",
                     help="required to connect to a LIVE port (real money)")
+    ap.add_argument("--broker-symbol", default="",
+                    help="IBKR ticker if it differs from the data symbol "
+                         "(e.g. data SAN.MC on yahoo -> broker SAN)")
+    ap.add_argument("--currency", default="USD", help="order currency: USD, EUR ...")
+    ap.add_argument("--exchange", default="SMART")
+    ap.add_argument("--primary", default="",
+                    help="primary exchange, e.g. BM for Bolsa de Madrid")
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--risk", type=float, default=0.01)
     ap.add_argument("--step", action="store_true", help="process the latest bar")
+    ap.add_argument("--loop", action="store_true",
+                    help="run automatically: call --step every --loop-interval seconds")
+    ap.add_argument("--loop-interval", type=int, default=3600,
+                    help="seconds between steps in --loop mode (default 3600 = 1h)")
     ap.add_argument("--replay", type=int, default=0,
                     help="fast-forward the last N bars (one simulated day each)")
     ap.add_argument("--report", action="store_true", help="print account status")
@@ -96,13 +107,16 @@ def main():
     elif args.broker == "ibkr":
         from qflow import broker as brk
         broker_obj = brk.IBKRBroker(host=args.ibkr_host, port=args.ibkr_port,
-                                    allow_live=args.ibkr_allow_live)
+                                    allow_live=args.ibkr_allow_live,
+                                    currency=args.currency, exchange=args.exchange,
+                                    primary_exchange=args.primary)
 
     kw = dict(symbol=args.symbol, source=args.source, strategy=args.strategy,
               capital=args.capital, risk_per_trade=args.risk,
               feed_kwargs=feed_kwargs, leader_symbol=args.leader_symbol,
               leader_source=args.leader_source, news_provider=news_provider,
-              risk_limits=risk_limits, broker=broker_obj)
+              risk_limits=risk_limits, broker=broker_obj,
+              broker_symbol=args.broker_symbol)
 
     if args.reset:
         PaperTrader(**kw).reset()
@@ -111,7 +125,23 @@ def main():
 
     if args.replay:
         print(pt.replay(args.replay))
-    if args.step:
+
+    if args.loop:
+        import time
+        from datetime import datetime
+        print(f"AUTO mode: stepping every {args.loop_interval}s. Keep IB Gateway open. "
+              "Ctrl+C to stop.")
+        try:
+            while True:
+                stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    print(f"[{stamp}] {pt.step()}")
+                except Exception as e:      # never let one bad tick kill the loop
+                    print(f"[{stamp}] step error: {type(e).__name__}: {e}")
+                time.sleep(max(30, args.loop_interval))
+        except KeyboardInterrupt:
+            print("\nStopped by user.")
+    elif args.step:
         print(pt.step())
 
     # always show status at the end

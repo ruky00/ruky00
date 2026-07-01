@@ -210,11 +210,15 @@ class IBKRBroker(BrokerAdapter):
         parent = (MarketOrder(action, qty) if entry_type == "MKT"
                   else LimitOrder(action, qty, entry))
         parent.transmit = False
+        # exit legs are Good-Till-Cancelled so a swing trade's stop/target don't
+        # expire at the daily close (IBKR account presets may still override this).
         tp = LimitOrder(exit_action, qty, target)
         tp.parentId = 0          # set after parent has an id
+        tp.tif = "GTC"
         tp.transmit = False
         sl = StopOrder(exit_action, qty, stop)
         sl.parentId = 0
+        sl.tif = "GTC"
         sl.transmit = True       # last leg transmits the whole group
 
         oca = f"oca-{symbol}-{int(entry*100)}"
