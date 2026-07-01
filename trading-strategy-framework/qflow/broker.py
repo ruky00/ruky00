@@ -22,6 +22,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 
 
+def _ensure_event_loop():
+    """Work around ib_insync/eventkit failing to import on Python >= 3.13/3.14.
+
+    eventkit calls ``asyncio.get_event_loop()`` at import time; on newer Pythons
+    that raises when no loop exists. Create one first so the import succeeds.
+    """
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
 @dataclass
 class BracketResult:
     order_id: str
@@ -140,6 +153,7 @@ class IBKRBroker(BrokerAdapter):
         self.ib = None
 
     def connect(self):
+        _ensure_event_loop()               # Python 3.13/3.14 compatibility
         try:
             from ib_insync import IB
         except ImportError as e:
@@ -148,6 +162,12 @@ class IBKRBroker(BrokerAdapter):
                 "    pip install ib_insync\n"
                 "Open TWS/Gateway, enable API (Configure > API > Settings), then "
                 "connect to the paper port 7497.") from e
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"ib_insync failed to import ({e}). This usually means Python is "
+                "too new for ib_insync (3.14). Use Python 3.11 or 3.12 in a venv:\n"
+                "    py -3.12 -m venv .venv && .venv\\Scripts\\activate\n"
+                "    pip install -r requirements.txt ib_insync") from e
         self.ib = IB()
         self.ib.connect(self.host, self.port, clientId=self.client_id)
         return self

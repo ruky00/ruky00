@@ -22,7 +22,14 @@ whenever the bot trades.
 ## 2. Install IB Gateway
 - Download **IB Gateway** (the "stable" build) from the IBKR website and install
   it on the computer that will run the bot.
-- `pip install ib_insync` in the same Python environment as this repo.
+- **Use Python 3.11 or 3.12** for the bot — `ib_insync` does **not** support
+  Python 3.14 (it fails to import with a `RuntimeError` about the event loop).
+  Create a dedicated environment:
+  ```powershell
+  py -3.12 -m venv .venv
+  .venv\Scripts\activate
+  pip install -r requirements.txt ib_insync
+  ```
 
 ## 3. Enable the API in IB Gateway
 1. Launch IB Gateway → log in choosing **Paper Trading** mode.

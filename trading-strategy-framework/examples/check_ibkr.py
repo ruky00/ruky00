@@ -23,10 +23,25 @@ def main():
     ap.add_argument("--client-id", type=int, default=1)
     args = ap.parse_args()
 
+    # Python 3.13/3.14 compatibility: eventkit needs an event loop at import time
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
     try:
         from ib_insync import IB
     except ImportError:
         print("[X] ib_insync is not installed. Run:  pip install ib_insync")
+        return
+    except RuntimeError as e:
+        print(f"[X] ib_insync failed to import: {e}")
+        print(f"    Your Python is {sys.version_info.major}.{sys.version_info.minor}. "
+              "ib_insync does not support Python 3.14.")
+        print("    Fix: use Python 3.11 or 3.12 in a virtual environment:")
+        print("       py -3.12 -m venv .venv && .venv\\Scripts\\activate")
+        print("       pip install -r requirements.txt ib_insync")
         return
 
     ib = IB()
