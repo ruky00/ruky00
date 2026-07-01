@@ -56,6 +56,8 @@ def main():
                     help="4002 IB Gateway paper (default), 7497 TWS paper, "
                          "4001/7496 = LIVE")
     ap.add_argument("--ibkr-host", default="127.0.0.1")
+    ap.add_argument("--ibkr-client-id", type=int, default=1,
+                    help="unique per running bot (use 2,3,... to run several)")
     ap.add_argument("--ibkr-allow-live", action="store_true",
                     help="required to connect to a LIVE port (real money)")
     ap.add_argument("--ibkr-tif", default="GTC", choices=["GTC", "DAY"],
@@ -109,6 +111,7 @@ def main():
     elif args.broker == "ibkr":
         from qflow import broker as brk
         broker_obj = brk.IBKRBroker(host=args.ibkr_host, port=args.ibkr_port,
+                                    client_id=args.ibkr_client_id,
                                     allow_live=args.ibkr_allow_live,
                                     currency=args.currency, exchange=args.exchange,
                                     primary_exchange=args.primary, tif=args.ibkr_tif)

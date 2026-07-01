@@ -42,6 +42,8 @@ def main():
     ap.add_argument("--broker", default="none", choices=["none", "paper", "ibkr"])
     ap.add_argument("--ibkr-port", type=int, default=4002)
     ap.add_argument("--ibkr-host", default="127.0.0.1")
+    ap.add_argument("--ibkr-client-id", type=int, default=1,
+                    help="unique per running bot (use 2,3,... to run several)")
     ap.add_argument("--ibkr-allow-live", action="store_true")
     ap.add_argument("--currency", default="USD")
     ap.add_argument("--exchange", default="SMART")
@@ -89,6 +91,7 @@ def main():
     elif args.broker == "ibkr":
         from qflow import broker as brk
         broker_obj = brk.IBKRBroker(host=args.ibkr_host, port=args.ibkr_port,
+                                    client_id=args.ibkr_client_id,
                                     allow_live=args.ibkr_allow_live,
                                     currency=args.currency, exchange=args.exchange,
                                     primary_exchange=args.primary, tif=args.ibkr_tif)

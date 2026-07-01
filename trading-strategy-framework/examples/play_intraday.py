@@ -43,6 +43,8 @@ def main():
     ap = argparse.ArgumentParser(description="intraday 5m NASDAQ play (paper)")
     ap.add_argument("--symbols", default="AAPL,MSFT,NVDA,AMD,TSLA,QQQ")
     ap.add_argument("--port", type=int, default=4002)
+    ap.add_argument("--client-id", type=int, default=7,
+                    help="unique per running bot (avoid clashing with other scripts)")
     ap.add_argument("--capital", type=float, default=1_000_000.0)
     ap.add_argument("--risk", type=float, default=0.001)       # 0.1% per trade
     ap.add_argument("--rsi-window", type=int, default=14)
@@ -56,7 +58,7 @@ def main():
     args = ap.parse_args()
 
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-    broker = brk.IBKRBroker(port=args.port, tif="DAY")         # DAY avoids 10349
+    broker = brk.IBKRBroker(port=args.port, client_id=args.client_id, tif="DAY")  # DAY avoids 10349
     broker.connect()
     print(f"🎮 PLAY intraday 5m | account {broker.ib.managedAccounts()} | {symbols}")
     print(f"   RSI<{args.rsi_buy:g} buy / RSI>{args.rsi_sell:g} "

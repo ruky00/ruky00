@@ -199,7 +199,19 @@ class IBKRBroker(BrokerAdapter):
                 "    py -3.12 -m venv .venv && .venv\\Scripts\\activate\n"
                 "    pip install -r requirements.txt ib_insync") from e
         self.ib = IB()
-        self.ib.connect(self.host, self.port, clientId=self.client_id)
+        try:
+            self.ib.connect(self.host, self.port, clientId=self.client_id, timeout=15)
+        except (TimeoutError, Exception) as e:
+            if isinstance(e, RuntimeError):
+                raise
+            raise RuntimeError(
+                f"Could not connect to IBKR on {self.host}:{self.port} "
+                f"(clientId={self.client_id}): {type(e).__name__}. Common causes:\n"
+                "  1. Another script is already using this clientId — give each bot "
+                "a different --ibkr-client-id (2, 3, ...), or close the other one.\n"
+                "  2. Python 3.14 is not supported by ib_insync — use a 3.12 venv.\n"
+                "  3. IB Gateway not fully logged in / API not enabled (port 4002)."
+            ) from e
         return self
 
     def disconnect(self):
