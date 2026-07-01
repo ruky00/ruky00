@@ -68,11 +68,16 @@ def run_backtest(
     commission_bps: float = 2.0,
     slippage_bps: float = 2.0,
     allow_short: bool = True,
+    flatten_eod: bool = False,        # intraday: force-flat at each session's close
 ) -> BacktestResult:
     """
     Walk bar-by-bar. A position is opened when the target signal flips to
     +/-1 while flat. It is closed on stop, target, or signal reversal/exit.
     Fills happen at the next bar's open to avoid look-ahead.
+
+    With ``flatten_eod=True`` any open position is closed on the last bar of each
+    calendar day (nothing held overnight) — use this to backtest intraday
+    strategies on intraday bars.
     """
     close = df["close"].values
     open_ = df["open"].values
@@ -80,6 +85,9 @@ def run_backtest(
     low = df["low"].values
     sig = signal.reindex(df.index).fillna(0).values
     atr_v = atr.reindex(df.index).bfill().values
+    # last bar of each calendar day (for intraday end-of-day flattening)
+    days = np.asarray([t.date() for t in df.index])
+    is_session_end = np.r_[days[:-1] != days[1:], True] if len(days) else np.array([])
 
     fee = (commission_bps + slippage_bps) / 1e4
 
@@ -114,6 +122,10 @@ def run_backtest(
             if exit_px is None and sig[i] != pos:
                 exit_px, reason = close[i], "signal"
 
+            # Intraday: never hold overnight — close on the session's last bar
+            if exit_px is None and flatten_eod and is_session_end[i]:
+                exit_px, reason = close[i], "eod"
+
             if exit_px is not None:
                 fill = exit_px * (1 - fee * pos)  # slippage against us
                 pnl = pos * (fill - entry_px) * shares
@@ -136,7 +148,9 @@ def run_backtest(
                 shares = 0.0
 
         # ---- open a new position if flat and signalled ----
-        if pos == 0 and sig[i] != 0 and i + 1 < len(df):
+        # (skip on a session's last bar when intraday — no overnight holds)
+        if (pos == 0 and sig[i] != 0 and i + 1 < len(df)
+                and not (flatten_eod and is_session_end[i])):
             direction = int(sig[i])
             if direction == -1 and not allow_short:
                 pass

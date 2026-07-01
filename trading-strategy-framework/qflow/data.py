@@ -92,6 +92,49 @@ def synthetic_ohlcv(
     return df
 
 
+def synthetic_intraday(n_days: int = 60,
+                       bars_per_day: int = 78,      # 6.5h session / 5 min
+                       start_price: float = 100.0,
+                       seed: int | None = 42) -> pd.DataFrame:
+    """
+    Synthetic 5-minute intraday OHLCV with realistic microstructure: a small
+    overnight gap each day, mild intraday mean-reversion (so reversion strategies
+    have something to trade), and higher open/close volatility. Timestamps are
+    business days, 09:30–16:00, 5-minute bars. For testing the intraday
+    backtester offline; use real 5m bars (feeds.from_yahoo interval='5m') live.
+    """
+    rng = np.random.default_rng(seed)
+    days = pd.bdate_range(end=pd.Timestamp("2025-12-31"), periods=n_days)
+    stamps, closes = [], []
+    price = start_price
+    for day in days:
+        price *= np.exp(rng.normal(0.0002, 0.008))          # overnight gap
+        # AR(1) with negative coefficient -> intraday mean reversion
+        shocks = rng.normal(0, 0.0011, bars_per_day)
+        r = np.empty(bars_per_day)
+        prev = 0.0
+        for k in range(bars_per_day):
+            r[k] = -0.15 * prev + shocks[k]
+            prev = r[k]
+        path = price * np.exp(np.cumsum(r))
+        closes.extend(path)
+        price = path[-1]
+        t0 = day + pd.Timedelta(hours=9, minutes=30)
+        stamps.extend(t0 + pd.Timedelta(minutes=5 * k) for k in range(bars_per_day))
+
+    close = np.asarray(closes)
+    n = len(close)
+    noise = rng.normal(0, 0.0006, n)
+    open_ = close * (1 + noise)
+    high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.0008, n)))
+    low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.0008, n)))
+    volume = rng.lognormal(mean=10.0, sigma=0.4, size=n)
+    df = pd.DataFrame({"open": open_, "high": high, "low": low,
+                       "close": close, "volume": volume},
+                      index=pd.DatetimeIndex(stamps, name="date"))
+    return df
+
+
 def load_csv(path: str) -> pd.DataFrame:
     """Load OHLCV data from a CSV with a `date` column."""
     df = pd.read_csv(path, parse_dates=["date"])

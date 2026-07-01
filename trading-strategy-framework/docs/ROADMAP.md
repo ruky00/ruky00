@@ -52,9 +52,11 @@ and purpose.
 **Short term — make the funded bot trustworthy**
 1. **Per-trade journal → CSV** for the bot (entry/exit/SL/TP/P&L per trade) to
    review and compute live win-rate / expectancy.
-2. **Intraday backtester** on 5-minute bars (realistic costs/slippage) so the
-   intraday strategies are *validated* the way the daily ones are — today they're
-   validated on daily data, which is only a proxy.
+2. ✅ **Intraday backtester** on 5-minute bars with end-of-day flattening
+   (`run_backtest(..., flatten_eod=True)`, `examples/research/backtest_intraday.py`).
+   First finding: the daily strategies run *naively* on 5m bars **lose money**
+   (costs eat the many small trades) — so the next step is intraday-*tuned*
+   strategies + walk-forward on the intraday timeframe, not reusing daily params.
 3. **Session controls**: auto-flat before the close, no new entries in the last
    30 min, max trades/day, max concurrent positions.
 4. **Funded-account rules engine**: encode the prop-firm limits (max daily loss,

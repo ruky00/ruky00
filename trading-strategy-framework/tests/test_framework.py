@@ -48,6 +48,19 @@ def test_metrics_known_values():
     assert metrics.max_drawdown(pd.Series([1, 2, 3, 4.0])) == 0.0
 
 
+def test_intraday_backtest_flattens_overnight():
+    df = data.synthetic_intraday(n_days=20, seed=3)
+    assert len(df) > 1000 and (df["high"] >= df["low"]).all()
+    sig = strategies.mean_reversion(df)
+    res = backtest.run_backtest(df, sig.signal, sig.atr, capital=100_000,
+                                risk_per_trade=0.002, flatten_eod=True)
+    # with EOD flattening, no trade may span two calendar days
+    for t in res.trades:
+        assert t.entry_date.date() == t.exit_date.date()
+    # and the equity curve is intact
+    assert len(res.equity) == len(df) and res.equity.iloc[0] > 0
+
+
 def test_backtest_runs_and_is_causal():
     df = _df()
     sig = strategies.trend_following(df)
