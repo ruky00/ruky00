@@ -15,9 +15,9 @@ real account once a conservative readiness gate passes.
 ## The pipeline
 
 ```
-1. Pick a candidate   →  examples/compare_strategies.py   (backtest on real data)
+1. Pick a candidate   →  examples/research/compare_strategies.py   (backtest on real data)
 2. Stress it          →  Monte-Carlo + drawdown (docs/PLAYBOOK.md §9, §10)
-3. Forward test       →  examples/paper_trade.py  (this doc — 1–2 weeks)
+3. Forward test       →  examples/live/paper_trade.py  (this doc — 1–2 weeks)
 4. Readiness gate     →  pt.readiness() / --report
 5. Go live small      →  only if gates pass, minimum size, real broker adapter
 ```
@@ -25,7 +25,7 @@ real account once a conservative readiness gate passes.
 ## Step 1 — choose the candidate (already done on real data)
 
 ```bash
-python examples/compare_strategies.py
+python examples/research/compare_strategies.py
 ```
 
 On the bundled real samples (AAPL, TSLA), `mean_reversion` is the only strategy
@@ -46,8 +46,8 @@ Run **once per day, after the close**. State persists between runs under
 
 ```bash
 # daily: pull the latest bar, act on it, then show status
-python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --step
-python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --report
+python examples/live/paper_trade.py --strategy mean_reversion --symbol AAPL --step
+python examples/live/paper_trade.py --strategy mean_reversion --symbol AAPL --report
 ```
 
 The same workflow runs the **intraday edge strategies** (`gap_fade`, `lead_lag`)
@@ -55,8 +55,8 @@ discovered in [`EDGES.md`](EDGES.md) — they enter at the open and exit at the
 close, flat overnight:
 
 ```bash
-python examples/paper_trade.py --strategy gap_fade --symbol TSLA --step
-python examples/paper_trade.py --strategy lead_lag --symbol TSLA \
+python examples/live/paper_trade.py --strategy gap_fade --symbol TSLA --step
+python examples/live/paper_trade.py --strategy lead_lag --symbol TSLA \
     --leader-symbol AAPL --step          # trade TSLA off AAPL's prior move
 ```
 
@@ -64,7 +64,7 @@ Automate it with cron (weekdays at 17:30):
 
 ```cron
 30 17 * * 1-5  cd /path/to/trading-strategy-framework && \
-  /usr/bin/python3 examples/paper_trade.py --strategy mean_reversion --symbol AAPL --step \
+  /usr/bin/python3 examples/live/paper_trade.py --strategy mean_reversion --symbol AAPL --step \
   >> data/paper/cron.log 2>&1
 ```
 
@@ -73,7 +73,7 @@ simulated day) so you can see the journal, equity curve and readiness output
 without waiting:
 
 ```bash
-python examples/paper_trade.py --strategy trend_following --symbol TSLA --reset --replay 15
+python examples/live/paper_trade.py --strategy trend_following --symbol TSLA --reset --replay 15
 ```
 
 ### What gets recorded
@@ -133,5 +133,5 @@ Verdicts: **GO** (all gates) / **ALMOST** (one open) / **NOT READY**.
 - Re-validate on the *exact* instrument, timeframe, fees and slippage you will
   trade. Costs and slippage kill more strategies than bad signals do.
 ```bash
-python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --report
+python examples/live/paper_trade.py --strategy mean_reversion --symbol AAPL --report
 ```

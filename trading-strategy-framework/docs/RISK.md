@@ -23,11 +23,11 @@ row** with the reason, so every blocked trade is auditable. The governor's state
 
 ```bash
 # enable with defaults
-python examples/paper_trade.py --strategy trend_following --symbol TSLA \
+python examples/live/paper_trade.py --strategy trend_following --symbol TSLA \
     --kill-switches --step
 
 # tune the limits
-python examples/paper_trade.py --strategy trend_following --symbol TSLA \
+python examples/live/paper_trade.py --strategy trend_following --symbol TSLA \
     --kill-switches --max-drawdown 0.08 --max-daily-loss 0.02 --max-heat 0.05 --step
 ```
 ```python

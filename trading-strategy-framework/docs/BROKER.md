@@ -46,7 +46,7 @@ the 1%-risk rule; the adapter just translates them into the bracket.
 2. Open **TWS** or **IB Gateway**, log in to your **paper** account.
 3. *Configure → API → Settings*: enable *ActiveX and Socket Clients*; set the
    socket port to **7497** (paper).
-4. `python examples/live_ibkr.py`
+4. `python examples/live/live_ibkr.py`
 
 ### Safety rails
 - `IBKRBroker` defaults to the paper port 7497. The live ports (7496/4001)

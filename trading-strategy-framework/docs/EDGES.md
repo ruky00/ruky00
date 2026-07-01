@@ -9,7 +9,7 @@ This covers the two things you asked for: (a) **finding small, recurring daily
 inefficiencies** and (b) **optimising a strategy honestly**. Reproduce with:
 
 ```bash
-python examples/find_edges.py
+python examples/research/find_edges.py
 ```
 
 ---
@@ -112,7 +112,7 @@ print(res.report())
 
 1. Pick the edge with the best **OOS / cost-aware** Sharpe (here: TSLA gap-fade).
 2. Re-scan it on the **exact instrument** you'll trade (`feeds.get(...)`).
-3. Forward-test on paper for 1–2 weeks (`examples/paper_trade.py`,
+3. Forward-test on paper for 1–2 weeks (`examples/live/paper_trade.py`,
    see [`PAPER_TRADING.md`](PAPER_TRADING.md)).
 4. Go live only if the readiness gate passes — minimum size first.
 
@@ -135,7 +135,7 @@ scores any daily pattern on four axes and ranks a battery of candidates:
 | Tradeable | Survives costs? | net Sharpe > 0 |
 
 ```bash
-python examples/repeatable_edges.py
+python examples/research/repeatable_edges.py
 ```
 ```
 REPEATABLE-EDGE SCAN — TSLA (leader AAPL)
@@ -185,7 +185,7 @@ print(dual_listing.analyze_pair(mad, us, "Santander")["best"])
 ```
 
 ```bash
-python examples/scan_universe.py        # offline demo; set OPEN_NETWORK=True for real data
+python examples/research/scan_universe.py        # offline demo; set OPEN_NETWORK=True for real data
 ```
 
 > A wide scan tests many hypotheses, so it inflates false positives — that's why
@@ -200,14 +200,14 @@ virtual money exactly like the swing strategies:
 
 ```bash
 # gap-fade on a volatile name
-python examples/paper_trade.py --strategy gap_fade --symbol TSLA --reset --replay 400
+python examples/live/paper_trade.py --strategy gap_fade --symbol TSLA --reset --replay 400
 
 # cross-market lead-lag: trade TSLA off AAPL's prior-day move
-python examples/paper_trade.py --strategy lead_lag --symbol TSLA \
+python examples/live/paper_trade.py --strategy lead_lag --symbol TSLA \
     --leader-symbol AAPL --reset --replay 756
 
 # your España -> US version (run on your own machine, open network):
-python examples/paper_trade.py --strategy lead_lag --symbol SAN \
+python examples/live/paper_trade.py --strategy lead_lag --symbol SAN \
     --source yahoo --leader-symbol SAN.MC --leader-source yahoo --step
 ```
 

@@ -12,14 +12,14 @@ session**, with per-symbol kill-switches plus a portfolio-level drawdown breaker
 
 | Goal | Command |
 |------|---------|
-| **Backtest** the basket first | `python examples/backtest_portfolio.py` |
-| **Run** the basket (swing, at close) | `python examples/portfolio_run.py ...` |
-| **Gap-fade** (intraday, volatile names) | `python examples/gap_fade_routine.py --phase open/close ...` |
+| **Backtest** the basket first | `python examples/research/backtest_portfolio.py` |
+| **Run** the basket (swing, at close) | `python examples/live/portfolio_run.py ...` |
+| **Gap-fade** (intraday, volatile names) | `python examples/live/gap_fade_routine.py --phase open/close ...` |
 
 ## 1. Validate the basket (backtest + out-of-sample)
 
 ```bash
-python examples/backtest_portfolio.py     # edit BASKET; use 10y yahoo data
+python examples/research/backtest_portfolio.py     # edit BASKET; use 10y yahoo data
 ```
 Reports per-symbol and **aggregate** CAGR/Sharpe/maxDD, the `auto` strategy-usage
 mix, and an **in-sample vs out-of-sample** split. The portfolio max-drawdown is
@@ -30,11 +30,11 @@ Only proceed if OOS Sharpe stays positive and near in-sample.
 
 ```bash
 # offline preview
-python examples/portfolio_run.py --symbols AAPL,TSLA --source github \
+python examples/live/portfolio_run.py --symbols AAPL,TSLA --source github \
     --broker paper --reset --replay 300 --kill-switches
 
 # live: 5 volatile names through IB Gateway paper, auto strategy, loop
-python examples/portfolio_run.py --symbols TSLA,NVDA,AMD,COIN,PLTR --source yahoo \
+python examples/live/portfolio_run.py --symbols TSLA,NVDA,AMD,COIN,PLTR --source yahoo \
     --strategy auto --risk 0.005 --allocation equal \
     --kill-switches --portfolio-max-drawdown 0.15 \
     --broker ibkr --ibkr-port 4002 --news rss --loop --loop-interval 3600
@@ -62,9 +62,9 @@ Spanish names (data on Yahoo `.MC`, order on Madrid in EUR) work too — pass
 Two scheduled phases per day on the volatile basket:
 
 ```bash
-python examples/gap_fade_routine.py --phase open  --symbols TSLA,NVDA,AMD \
+python examples/live/gap_fade_routine.py --phase open  --symbols TSLA,NVDA,AMD \
     --source yahoo --broker ibkr --ibkr-port 4002       # ~15:35 Spain (US open)
-python examples/gap_fade_routine.py --phase close --symbols TSLA,NVDA,AMD \
+python examples/live/gap_fade_routine.py --phase close --symbols TSLA,NVDA,AMD \
     --source yahoo --broker ibkr --ibkr-port 4002       # ~21:55 Spain (US close)
 ```
 `open` fades each opening gap with a market order (buy gap-downs, short gap-ups)

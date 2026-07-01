@@ -51,7 +51,7 @@ cd ruky00/trading-strategy-framework
 pip install -r requirements.txt ib_insync
 
 # forward-test through IB Gateway paper (port 4002), kill-switches on:
-python examples/paper_trade.py --symbol AAPL --source yahoo \
+python examples/live/paper_trade.py --symbol AAPL --source yahoo \
     --strategy mean_reversion --risk 0.005 \
     --kill-switches --max-drawdown 0.08 \
     --broker ibkr --ibkr-port 4002 --news rss --step
@@ -68,7 +68,7 @@ When the bot opens a position you'll see it, in real time:
 ```cron
 # weekdays 22:10 (after the US close, Europe time). IB Gateway must be running.
 10 22 * * 1-5  cd /path/to/trading-strategy-framework && \
-  /usr/bin/python3 examples/paper_trade.py --symbol AAPL --source yahoo \
+  /usr/bin/python3 examples/live/paper_trade.py --symbol AAPL --source yahoo \
   --strategy mean_reversion --risk 0.005 --kill-switches \
   --broker ibkr --ibkr-port 4002 --news rss --step \
   >> data/paper/ibkr_cron.log 2>&1

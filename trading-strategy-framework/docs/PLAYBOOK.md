@@ -24,7 +24,7 @@ Reproduce the headline numbers with:
 
 ```bash
 pip install -r requirements.txt
-python examples/run_all.py
+python examples/research/run_all.py
 ```
 
 ---
@@ -199,7 +199,7 @@ eq = multifactor.backtest_panel(prices, w, capital=10_000)
 
 ## 6. Strategy Optimization
 
-A small grid search over the trend strategy lives in `examples/run_all.py`.
+A small grid search over the trend strategy lives in `examples/research/run_all.py`.
 It sweeps `EMA fast ∈ {10,20,30}`, `slow ∈ {50,100,150}`, `ADX thr ∈ {15,20,25}`
 and keeps the **highest-Sharpe** configuration.
 
@@ -358,6 +358,6 @@ than a flashy indicator — so they stay under-exploited.
 
 ### Reproduce everything
 ```bash
-python examples/run_all.py     # full walkthrough on offline synthetic data
+python examples/research/run_all.py     # full walkthrough on offline synthetic data
 python tests/test_framework.py # correctness checks
 ```

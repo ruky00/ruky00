@@ -41,7 +41,7 @@ without touching the rest of the system.
    - `x0.0` — news strongly against the trade: **skip it**.
 
 ```bash
-python examples/news_demo.py
+python examples/research/news_demo.py
 ```
 ```
 NEWS — TSLA  (3 items, tone=negative, avg sentiment -0.22, 1 events)
@@ -58,7 +58,7 @@ news feed, so backtests stay clean and reproducible.
 
 ```bash
 # live daily run with a free RSS news overlay
-python examples/paper_trade.py --strategy mean_reversion --symbol AAPL \
+python examples/live/paper_trade.py --strategy mean_reversion --symbol AAPL \
     --news rss --step
 ```
 ```python

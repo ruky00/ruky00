@@ -11,6 +11,25 @@ anywhere — then swap in your own CSV data when you're ready.
 
 ---
 
+## Two products
+
+| | **The Lab** (research + daily swing) | **The Funded Bot** (live intraday) |
+|---|---|---|
+| Code | `qflow/` · `examples/research/` · `examples/live/` | `bot/intraday_bot.py` |
+| Job | Find & validate robust `(symbol, strategy)` edges, forward-test the daily book | Trade the validated strategies **intraday** for recurring P&L on a funded/IBKR account |
+| Bars | daily (5–10y backtest) | 5-minute, live |
+
+The Lab decides **what** to trade; the Bot **trades it** — same strategies, risk
+engine and broker layer, different timeframe. Full plan & roadmap:
+**[`docs/ROADMAP.md`](docs/ROADMAP.md)**.
+
+```bash
+# The Funded Bot — live intraday on IBKR paper (Python 3.12 venv, IB Gateway on 4002)
+python bot/intraday_bot.py --strategy auto --symbols NVDA,AMD,TSLA,AAPL --kill-switches
+```
+
+---
+
 ## What's inside
 
 | Module | Purpose |
@@ -50,19 +69,19 @@ detection — is in **[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md)**.
 ```bash
 pip install -r requirements.txt        # numpy + pandas
 
-python examples/run_all.py             # full end-to-end demo (synthetic)
-python examples/compare_strategies.py  # backtest all strategies on REAL data
-python examples/find_edges.py          # hunt daily inefficiencies + walk-forward tuning
-python examples/repeatable_edges.py    # rank patterns by year-to-year repeatability
-python examples/scan_universe.py       # scan a whole universe + España<->US dual listings
-python examples/walk_forward.py        # rolling calendar walk-forward (train N yrs -> test next)
-python examples/select_portfolio.py    # auto-filter a basket to robust (symbol, strategy) pairs
+python examples/research/run_all.py             # full end-to-end demo (synthetic)
+python examples/research/compare_strategies.py  # backtest all strategies on REAL data
+python examples/research/find_edges.py          # hunt daily inefficiencies + walk-forward tuning
+python examples/research/repeatable_edges.py    # rank patterns by year-to-year repeatability
+python examples/research/scan_universe.py       # scan a whole universe + España<->US dual listings
+python examples/research/walk_forward.py        # rolling calendar walk-forward (train N yrs -> test next)
+python examples/research/select_portfolio.py    # auto-filter a basket to robust (symbol, strategy) pairs
 python tests/test_framework.py         # 36 correctness tests
 ```
 
 ### Finding daily edges & optimising
 
-`examples/find_edges.py` scans real data for recurring daily inefficiencies and
+`examples/research/find_edges.py` scans real data for recurring daily inefficiencies and
 backtests the tradeable ones net of costs. On the bundled samples it surfaces a
 **gap-fade edge on high-volatility names** (TSLA, Sharpe 0.77) and a
 **cross-market lead-lag** (one asset leading another by a day, Sharpe ~0.6), and
@@ -77,10 +96,10 @@ where it left off — a true forward test, not a re-run.
 
 ```bash
 # preview the whole workflow now (replays recent history, one bar = one day)
-python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --reset --replay 15
+python examples/live/paper_trade.py --strategy mean_reversion --symbol AAPL --reset --replay 15
 
 # the daily routine (run after the close; automate with cron)
-python examples/paper_trade.py --strategy mean_reversion --symbol AAPL --step --report
+python examples/live/paper_trade.py --strategy mean_reversion --symbol AAPL --step --report
 ```
 
 It journals every fill, tracks the equity curve, and prints a **go-live
@@ -94,9 +113,9 @@ adapter (only worth it if you already pay for a Terminal — see the honest
 cost analysis in **[`docs/NEWS.md`](docs/NEWS.md)**).
 
 ```bash
-python examples/news_demo.py                                   # offline demo
-python examples/paper_trade.py --symbol AAPL --news rss --step # live overlay
-python examples/paper_trade.py --symbol AAPL --news rss --finbert --step  # FinBERT sentiment
+python examples/research/news_demo.py                                   # offline demo
+python examples/live/paper_trade.py --symbol AAPL --news rss --step # live overlay
+python examples/live/paper_trade.py --symbol AAPL --news rss --finbert --step  # FinBERT sentiment
 ```
 
 ### Kill-switches (risk governor)
@@ -106,7 +125,7 @@ loss-streak halts — that veto new entries when things go wrong, with state tha
 persists across daily runs. Details: **[`docs/RISK.md`](docs/RISK.md)**.
 
 ```bash
-python examples/paper_trade.py --symbol TSLA --kill-switches --max-drawdown 0.08 --step
+python examples/live/paper_trade.py --symbol TSLA --kill-switches --max-drawdown 0.08 --step
 ```
 
 ### Live execution (Interactive Brokers)
@@ -120,7 +139,7 @@ port**; live ports require `allow_live=True`. Backtests never send orders. Conce
 
 ```bash
 # forward-test through IB Gateway paper (port 4002) with kill-switches + news
-python examples/paper_trade.py --symbol AAPL --source yahoo --strategy mean_reversion \
+python examples/live/paper_trade.py --symbol AAPL --source yahoo --strategy mean_reversion \
     --risk 0.005 --kill-switches --broker ibkr --ibkr-port 4002 --news rss --step
 ```
 ```python
@@ -139,13 +158,13 @@ pt.step()    # the only path that places real orders
 kill-switches. Details: **[`docs/PORTFOLIO.md`](docs/PORTFOLIO.md)**.
 
 ```bash
-python examples/backtest_portfolio.py     # validate the basket (in/out-of-sample)
-python examples/portfolio_run.py --symbols TSLA,NVDA,AMD,COIN,PLTR --source yahoo \
+python examples/research/backtest_portfolio.py     # validate the basket (in/out-of-sample)
+python examples/live/portfolio_run.py --symbols TSLA,NVDA,AMD,COIN,PLTR --source yahoo \
     --strategy auto --risk 0.005 --kill-switches \
     --broker ibkr --ibkr-port 4002 --news rss --loop
 # optional intraday gap-fade on the same basket (two scheduled phases):
-python examples/gap_fade_routine.py --phase open  --symbols TSLA,NVDA,AMD --broker ibkr
-python examples/gap_fade_routine.py --phase close --symbols TSLA,NVDA,AMD --broker ibkr
+python examples/live/gap_fade_routine.py --phase open  --symbols TSLA,NVDA,AMD --broker ibkr
+python examples/live/gap_fade_routine.py --phase close --symbols TSLA,NVDA,AMD --broker ibkr
 ```
 
 ### Minimal example
@@ -196,13 +215,17 @@ ordinary machine.
 
 ```
 trading-strategy-framework/
-├── qflow/            # the framework package (data, feeds, strategies, backtest, paper, ...)
-├── examples/         # run_all · compare_strategies · find_edges · news_demo · paper_trade
-├── tests/            # test_framework.py — 32 correctness checks
-├── data/samples/     # bundled REAL data (AAPL, TSLA, NVDA, AMD, NFLX, AMZN, MSFT, GOOGL)
-├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · BROKER · SETUP_IBKR · PORTFOLIO · PAPER_TRADING · DISCLAIMER
+├── qflow/               # the shared engine (data, feeds, strategies, backtest, risk, broker, ...)
+├── bot/
+│   └── intraday_bot.py  # THE FUNDED-ACCOUNT INTRADAY BOT (product 2)
+├── examples/
+│   ├── research/        # backtest · walk-forward · edge-finding · universe selection (the lab)
+│   └── live/            # daily-swing paper/portfolio runners + IBKR utilities
+├── tests/               # test_framework.py — 36 correctness checks
+├── data/samples/        # bundled REAL data (AAPL, TSLA, NVDA, AMD, NFLX, AMZN, MSFT, GOOGL)
+├── docs/                # ROADMAP · PLAYBOOK · EDGES · PORTFOLIO · RISK · BROKER · SETUP_IBKR · PAPER_TRADING · NEWS · DISCLAIMER
 ├── requirements.txt
-└── LICENSE           # MIT
+└── LICENSE              # MIT
 ```
 
 ## License
