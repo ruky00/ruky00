@@ -399,6 +399,50 @@ def test_paper_engine_broker_routing_live_only():
     assert pos["stop"] > 0 and pos["target"] > 0          # SL/TP placed at broker
 
 
+def test_broker_place_market():
+    from qflow import broker
+    pb = broker.PaperBroker(); pb.connect()
+    pb.place_market("AAPL", 5, "BUY", price=100)
+    assert pb.positions()["AAPL"]["qty"] == 5
+    pb.place_market("AAPL", 5, "SELL", price=101)   # nets to flat
+    assert "AAPL" not in pb.positions()
+
+
+def test_portfolio_runner_multi_symbol():
+    import tempfile
+    from qflow.portfolio_runner import PortfolioRunner
+    from qflow import broker
+    shared = broker.PaperBroker()
+    pr = PortfolioRunner(["AAPL", "TSLA"], strategy="auto", source="github",
+                         total_capital=10_000, allocation="equal",
+                         broker=shared, root=tempfile.mkdtemp(), reset=True)
+    # equal split, shared broker across all traders
+    caps = [t.state.capital for t in pr.traders.values()]
+    assert abs(sum(caps) - 10_000) < 1e-6 and all(abs(c - 5000) < 1e-6 for c in caps)
+    assert all(t.broker is shared for t in pr.traders.values())
+    out = pr.replay_all(300)
+    assert all(r["status"] == "replayed" for r in out)
+    assert pr.portfolio_equity() > 0
+    assert isinstance(pr.report(), str) and "PORTFOLIO" in pr.report()
+
+
+def test_portfolio_drawdown_halt():
+    import tempfile
+    from qflow.portfolio_runner import PortfolioRunner
+    from qflow import broker
+    pr = PortfolioRunner(["AAPL", "TSLA"], strategy="trend_following", source="github",
+                         total_capital=10_000, broker=broker.PaperBroker(),
+                         portfolio_max_drawdown=0.001,   # trip almost immediately
+                         root=tempfile.mkdtemp(), reset=True)
+    pr.replay_all(400)
+    # force a peak above current equity, then the guard must latch a halt
+    pr._pstate["peak_equity"] = pr.portfolio_equity() * 2
+    ok, why = pr._portfolio_guard()
+    assert not ok and pr._pstate["halted"]
+    # once halted, step_all refuses to open
+    assert pr.step_all()[0]["status"] == "portfolio-halted"
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_")]
     passed = 0

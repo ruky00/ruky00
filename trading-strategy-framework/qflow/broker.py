@@ -62,6 +62,9 @@ class BrokerAdapter:
     def positions(self) -> dict: raise NotImplementedError
     def place_bracket(self, symbol, qty, side, entry, stop, target,
                       entry_type="MKT") -> BracketResult: raise NotImplementedError
+    def place_market(self, symbol, qty, side) -> BracketResult:
+        """Plain market order (no bracket) — used by the intraday gap-fade routine."""
+        raise NotImplementedError
     def cancel_all(self, symbol=None): ...
     def flatten(self, symbol=None): ...
 
@@ -106,6 +109,24 @@ class PaperBroker(BrokerAdapter):
                                    "stop": stop, "target": target}
         res = BracketResult(order_id=oid, symbol=symbol, side=side.upper(),
                             qty=qty, entry=entry, stop=stop, target=target,
+                            status="filled", broker=self.name)
+        self._orders.append(res)
+        return res
+
+    def place_market(self, symbol, qty, side, price=0.0) -> BracketResult:
+        self._seq += 1
+        oid = f"PM-{self._seq}"
+        direction = 1 if side.upper() == "BUY" else -1
+        # net into any existing position
+        cur = self._positions.get(symbol, {"qty": 0.0, "entry": price})
+        new_qty = cur["qty"] + qty * direction
+        if abs(new_qty) < 1e-9:
+            self._positions.pop(symbol, None)
+        else:
+            self._positions[symbol] = {"qty": new_qty, "entry": price or cur["entry"],
+                                       "stop": 0.0, "target": 0.0}
+        res = BracketResult(order_id=oid, symbol=symbol, side=side.upper(),
+                            qty=qty, entry=price, stop=0.0, target=0.0,
                             status="filled", broker=self.name)
         self._orders.append(res)
         return res
@@ -234,6 +255,15 @@ class IBKRBroker(BrokerAdapter):
         return BracketResult(order_id=str(pid), symbol=symbol, side=action,
                              qty=qty, entry=entry, stop=stop, target=target,
                              status="submitted", broker=self.name)
+
+    def place_market(self, symbol, qty, side, price=0.0) -> BracketResult:
+        from ib_insync import MarketOrder
+        contract = self._contract(symbol)
+        self.ib.qualifyContracts(contract)
+        trade = self.ib.placeOrder(contract, MarketOrder(side.upper(), qty))
+        return BracketResult(order_id=str(trade.order.orderId), symbol=symbol,
+                             side=side.upper(), qty=qty, entry=price, stop=0.0,
+                             target=0.0, status="submitted", broker=self.name)
 
     def cancel_all(self, symbol=None):
         self.ib.reqGlobalCancel()

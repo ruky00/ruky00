@@ -35,6 +35,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/risk_governor.py` | **Kill-switches** — daily-loss / drawdown / heat / streak circuit breakers |
 | `qflow/broker.py` | **Execution** — PaperBroker + IBKRBroker (native bracket orders) |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
+| `qflow/portfolio_runner.py` | **Basket runner** — one strategy across many symbols, shared IBKR session |
 
 The full quant walkthrough — covering strategy generation, backtesting,
 risk/reward, regime detection, multi-factor models, optimization, portfolio
@@ -128,6 +129,22 @@ pt = PaperTrader("AAPL", source="yahoo", strategy="mean_reversion",
 pt.step()    # the only path that places real orders
 ```
 
+### Run a whole basket (grouped execution)
+
+`portfolio_run.py` trades a basket of volatile names at once with the adaptive
+`auto` strategy, sharing one IBKR session, with per-symbol + portfolio-level
+kill-switches. Details: **[`docs/PORTFOLIO.md`](docs/PORTFOLIO.md)**.
+
+```bash
+python examples/backtest_portfolio.py     # validate the basket (in/out-of-sample)
+python examples/portfolio_run.py --symbols TSLA,NVDA,AMD,COIN,PLTR --source yahoo \
+    --strategy auto --risk 0.005 --kill-switches \
+    --broker ibkr --ibkr-port 4002 --news rss --loop
+# optional intraday gap-fade on the same basket (two scheduled phases):
+python examples/gap_fade_routine.py --phase open  --symbols TSLA,NVDA,AMD --broker ibkr
+python examples/gap_fade_routine.py --phase close --symbols TSLA,NVDA,AMD --broker ibkr
+```
+
 ### Minimal example
 
 ```python
@@ -178,9 +195,9 @@ ordinary machine.
 trading-strategy-framework/
 ├── qflow/            # the framework package (data, feeds, strategies, backtest, paper, ...)
 ├── examples/         # run_all · compare_strategies · find_edges · news_demo · paper_trade
-├── tests/            # test_framework.py — 28 correctness checks
+├── tests/            # test_framework.py — 32 correctness checks
 ├── data/samples/     # bundled REAL sample datasets (AAPL, TSLA)
-├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · BROKER · SETUP_IBKR · PAPER_TRADING · DISCLAIMER
+├── docs/             # PLAYBOOK · EDGES · NEWS · RISK · BROKER · SETUP_IBKR · PORTFOLIO · PAPER_TRADING · DISCLAIMER
 ├── requirements.txt
 └── LICENSE           # MIT
 ```

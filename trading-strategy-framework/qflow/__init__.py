@@ -18,6 +18,7 @@ risk        : position sizing and risk/reward helpers
 risk_governor: portfolio kill-switches (daily loss, drawdown, heat, streak)
 broker      : execution adapters — PaperBroker + IBKRBroker (bracket orders)
 paper       : persistent paper-trading engine for forward testing
+portfolio_runner: run a strategy across a basket of symbols (shared broker session)
 optimize    : grid search + walk-forward (out-of-sample) parameter tuning
 anomalies   : daily-edge scanner (overnight, gaps, day-of-week, lead-lag)
 edge_lab    : repeatable-edge lab (significance + consistency + OOS persistence)
@@ -47,6 +48,7 @@ from . import (  # noqa: F401
     risk_governor,
     broker,
     paper,
+    portfolio_runner,
     optimize,
     anomalies,
     edge_lab,
