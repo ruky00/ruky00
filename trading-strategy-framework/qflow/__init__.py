@@ -24,6 +24,7 @@ anomalies   : daily-edge scanner (overnight, gaps, day-of-week, lead-lag)
 edge_lab    : repeatable-edge lab (significance + consistency + OOS persistence)
 universe    : scan a whole universe (IBEX-35 / S&P-500) for robust patterns
 dual_listing: España<->US cross-listing lead-lag (Santander/BBVA/Telefonica ADRs)
+portfolio_selector: walk-forward-filter a basket to robust (symbol, strategy) pairs
 news        : provider-agnostic news + finance sentiment (RSS/Finnhub/Bloomberg)
 
 This is an educational research toolkit. Nothing here is financial advice.
@@ -54,5 +55,6 @@ from . import (  # noqa: F401
     edge_lab,
     universe,
     dual_listing,
+    portfolio_selector,
     news,
 )

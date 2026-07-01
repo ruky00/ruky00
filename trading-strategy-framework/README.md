@@ -36,6 +36,7 @@ anywhere — then swap in your own CSV data when you're ready.
 | `qflow/broker.py` | **Execution** — PaperBroker + IBKRBroker (native bracket orders) |
 | `qflow/paper.py` | **Paper-trading engine** — persistent forward test with virtual money |
 | `qflow/portfolio_runner.py` | **Basket runner** — one strategy across many symbols, shared IBKR session |
+| `qflow/portfolio_selector.py` | **Auto universe filter** — keep only robust (symbol, strategy) pairs by walk-forward |
 
 The full quant walkthrough — covering strategy generation, backtesting,
 risk/reward, regime detection, multi-factor models, optimization, portfolio
@@ -55,7 +56,8 @@ python examples/find_edges.py          # hunt daily inefficiencies + walk-forwar
 python examples/repeatable_edges.py    # rank patterns by year-to-year repeatability
 python examples/scan_universe.py       # scan a whole universe + España<->US dual listings
 python examples/walk_forward.py        # rolling calendar walk-forward (train N yrs -> test next)
-python tests/test_framework.py         # 34 correctness tests
+python examples/select_portfolio.py    # auto-filter a basket to robust (symbol, strategy) pairs
+python tests/test_framework.py         # 36 correctness tests
 ```
 
 ### Finding daily edges & optimising

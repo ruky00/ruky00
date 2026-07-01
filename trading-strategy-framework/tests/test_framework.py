@@ -151,6 +151,24 @@ def test_improved_strategy_params():
     assert (vb.signal != 0).sum() <= (vb_off.signal != 0).sum() + 1
 
 
+def test_portfolio_selector():
+    from qflow import portfolio_selector as sel
+    res = sel.select(["NVDA", "AMD", "AMZN"], source="github", train_years=2,
+                     thresholds={"min_oos_sharpe": 0.5, "min_pos_ratio": 0.6,
+                                 "max_oos_drawdown": -0.25, "min_stability": 0.4,
+                                 "min_folds": 3},
+                     bt_kwargs={"capital": 10_000, "risk_per_trade": 0.01})
+    # every scanned pair carries the robustness fields + a pass flag
+    for r in res["all"]:
+        assert {"oos_sharpe", "oos_maxdd", "stability", "pos_ratio", "params",
+                "pass"} <= set(r)
+    # survivors satisfy the thresholds and the portfolio has one strategy per symbol
+    for r in res["survivors"]:
+        assert r["oos_sharpe"] >= 0.5 and r["pass"]
+    assert all(len({p["symbol"] for p in [r]}) == 1 for r in res["portfolio"].values())
+    assert isinstance(sel.report(res), str)
+
+
 def test_rolling_walk_forward():
     df = data.synthetic_ohlcv(2200, seed=14)   # spans several calendar years
     grid = {"rsi_buy": [5, 10], "rsi_exit": [55, 65]}
