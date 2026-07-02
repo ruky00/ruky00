@@ -89,17 +89,21 @@ def evaluate(df, strats=None, intervals=None, capital=100_000.0, risk=0.004,
     return rows
 
 
-def select_best(df, min_sharpe=0.0, max_dd=-0.5, **kwargs):
+def select_best(df, min_sharpe=0.0, max_dd=-0.5, return_ranked=False, **kwargs):
     """
     Pick the single best (strategy, interval) for `df`, or None if nothing clears
     the bar. A choice must have OOS Sharpe >= `min_sharpe` and OOS max drawdown
     shallower than `max_dd` (e.g. -0.5 = don't accept worse than -50%).
+    With ``return_ranked=True`` returns ``(choice, ranked)`` so callers can show
+    the best rejected candidate when nothing clears.
     """
     ranked = evaluate(df, **kwargs)
+    choice = None
     for r in ranked:
         if r["oos_sharpe"] >= min_sharpe and r["oos_maxdd"] >= max_dd:
-            return r
-    return None
+            choice = r
+            break
+    return (choice, ranked) if return_ranked else choice
 
 
 def select_cached(symbol, loader, cache_path="logs/select_cache.json",

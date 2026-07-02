@@ -93,7 +93,7 @@ def fetch_bars(broker, sym, interval, count=800, yahoo_rng="5d"):
 
 def build_plan(broker, symbols, default_name, default_interval, auto_select,
                cache_path=None, reselect_hours=24.0, costs_bps=4.0,
-               default_exits=None, use_presets=True):
+               default_exits=None, use_presets=True, fallback=""):
     """
     Decide, per symbol, which (strategy, interval, exits) to trade.
 
@@ -106,10 +106,14 @@ def build_plan(broker, symbols, default_name, default_interval, auto_select,
     Returns {sym: (name, fn, interval, exits)}.
     """
     plan = {}
-    half = costs_bps / 2.0
     for sym in symbols:
         name, interval = default_name, default_interval
         if auto_select:
+            # costs are per INSTRUMENT, not per broker: FX pairs cost ~1bp round
+            # trip wherever you trade them; 4bps (a stock assumption) would be
+            # 4+ pips/side on EURUSD and wrongly reject every FX edge.
+            sym_costs = 1.0 if brk.is_fx_pair(sym) else costs_bps
+            half = sym_costs / 2.0
             try:
                 loader = lambda s=sym: fetch_bars(broker, s, "5m", count=8000,
                                                   yahoo_rng="60d")
@@ -119,16 +123,27 @@ def build_plan(broker, symbols, default_name, default_interval, auto_select,
                         sym, loader, cache_path=cache_path,
                         max_age_hours=reselect_hours, **sel_kw)
                     tag = " (cached)" if (choice and choice.get("cached")) else ""
+                    ranked = None
                 else:
-                    choice = intraday_select.select_best(loader(), **sel_kw)
+                    choice, ranked = intraday_select.select_best(
+                        loader(), return_ranked=True, **sel_kw)
                     tag = ""
                 if choice:
                     name, interval = choice["strategy"], choice["interval"]
                     print(f"   auto-select {sym:<5} -> {name} @ {interval} "
                           f"(OOS Sharpe {choice['oos_sharpe']:+.2f}){tag}")
                 else:
-                    print(f"   auto-select {sym:<5} -> no intraday edge cleared the "
-                          f"bar; using default {name} @ {interval}")
+                    best = f" (best rejected: {ranked[0]['strategy']} @ " \
+                           f"{ranked[0]['interval']} OOS Sharpe " \
+                           f"{ranked[0]['oos_sharpe']:+.2f})" if ranked else ""
+                    if fallback:
+                        name, interval = fallback, default_interval
+                        print(f"   auto-select {sym:<5} -> nothing cleared the bar"
+                              f"{best}; falling back to {name} @ {interval}")
+                    else:
+                        print(f"   auto-select {sym:<5} -> nothing cleared the bar"
+                              f"{best}; SITTING OUT (no validated edge = no trade)")
+                        continue                     # funded-safe: skip the symbol
             except Exception as e:
                 print(f"   auto-select {sym:<5} -> data/selection error "
                       f"({type(e).__name__}); using default {name} @ {interval}")
@@ -174,6 +189,9 @@ def main():
                          "(-1 = auto: 1bp for mt5/FX, 4bps otherwise)")
     ap.add_argument("--no-exit-presets", action="store_true",
                     help="ignore per-strategy EXIT_PRESETS and use --stop-atr/--target-atr")
+    ap.add_argument("--fallback-strategy", default="",
+                    help="strategy to trade when auto-select finds no validated edge "
+                         "(default: sit out the symbol — the funded-safe choice)")
     ap.add_argument("--port", type=int, default=4002)
     ap.add_argument("--client-id", type=int, default=7)
     ap.add_argument("--capital", type=float, default=1_000_000.0)
@@ -238,7 +256,14 @@ def main():
                       reselect_hours=args.reselect_hours, costs_bps=costs,
                       default_exits={"stop_atr": args.stop_atr,
                                      "target_atr": args.target_atr, "max_bars": 0},
-                      use_presets=not args.no_exit_presets)
+                      use_presets=not args.no_exit_presets,
+                      fallback=args.fallback_strategy)
+    if not plan:
+        print("\nNo symbol has a validated intraday edge right now — not trading. "
+              "Re-run later (data changes), add symbols, or pass --fallback-strategy "
+              "vwap_snap to trade the flagship anyway.")
+        broker.disconnect()
+        return
     for _s, (_n, _f, _iv, _ex) in plan.items():
         mb = f" time-stop {_ex['max_bars']} bars" if _ex.get("max_bars") else ""
         print(f"   exits {_s:<5} -> SL {_ex['stop_atr']}xATR / TP {_ex['target_atr']}xATR{mb}")
@@ -328,6 +353,8 @@ def main():
 
             rows = []
             for sym in symbols:
+                if sym not in plan:
+                    continue                    # sitting out: no validated edge
                 name, fn, interval, exits = plan[sym]
                 try:
                     df = fetch_bars(broker, sym, interval, count=800, yahoo_rng="5d")
