@@ -1,0 +1,163 @@
+"""
+Data utilities.
+
+The framework is designed to run completely offline, so the default data
+source is a regime-aware synthetic OHLCV generator. It stitches together
+bull / bear / sideways segments with different drift and volatility, which
+makes it useful for stress-testing strategies across market conditions.
+
+A thin CSV loader is included for when you want to plug in real data
+(Yahoo Finance / exchange exports etc.). Expected columns:
+    date, open, high, low, close, volume
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+
+def _segment(n, start_price, mu, sigma, rng):
+    """Geometric-Brownian-Motion close path for one regime segment."""
+    daily = rng.normal(mu, sigma, n)
+    log_path = np.cumsum(daily)
+    return start_price * np.exp(log_path)
+
+
+def synthetic_ohlcv(
+    n_days: int = 2520,            # ~10 trading years
+    start_price: float = 100.0,
+    seed: int | None = 42,
+    freq: str = "B",
+) -> pd.DataFrame:
+    """
+    Generate a regime-aware synthetic OHLCV series.
+
+    Regimes rotate through bull / sideways / bear with realistic relative
+    drift and volatility so that downstream backtests see all conditions.
+    """
+    rng = np.random.default_rng(seed)
+
+    # (annualised-ish drift per day, daily vol) for each regime
+    regimes = {
+        "bull":     (0.0006, 0.011),
+        "sideways": (0.0000, 0.008),
+        "bear":     (-0.0007, 0.018),
+    }
+    order = ["bull", "sideways", "bear", "sideways", "bull", "bear", "sideways", "bull"]
+
+    closes = []
+    labels = []
+    price = start_price
+    remaining = n_days
+    i = 0
+    while remaining > 0:
+        name = order[i % len(order)]
+        mu, sigma = regimes[name]
+        seg_len = min(remaining, rng.integers(180, 360))
+        seg = _segment(seg_len, price, mu, sigma, rng)
+        closes.append(seg)
+        labels.extend([name] * seg_len)
+        price = seg[-1]
+        remaining -= seg_len
+        i += 1
+
+    close = np.concatenate(closes)[:n_days]
+    labels = labels[:n_days]
+
+    # Build OHLC around the close path
+    noise = rng.normal(0, 0.004, n_days)
+    open_ = close * (1 + noise)
+    high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.005, n_days)))
+    low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.005, n_days)))
+
+    base_vol = rng.lognormal(mean=13.0, sigma=0.4, size=n_days)
+    # Volume expands with absolute daily return (panic / euphoria proxy)
+    ret = np.r_[0.0, np.diff(np.log(close))]
+    volume = base_vol * (1 + 6 * np.abs(ret))
+
+    idx = pd.bdate_range(end=pd.Timestamp("2025-12-31"), periods=n_days, freq=freq)
+    df = pd.DataFrame(
+        {
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+            "regime": labels,
+        },
+        index=idx,
+    )
+    df.index.name = "date"
+    return df
+
+
+def synthetic_intraday(n_days: int = 60,
+                       bars_per_day: int = 78,      # 6.5h session / 5 min
+                       start_price: float = 100.0,
+                       seed: int | None = 42) -> pd.DataFrame:
+    """
+    Synthetic 5-minute intraday OHLCV with realistic microstructure: a small
+    overnight gap each day, mild intraday mean-reversion (so reversion strategies
+    have something to trade), and higher open/close volatility. Timestamps are
+    business days, 09:30–16:00, 5-minute bars. For testing the intraday
+    backtester offline; use real 5m bars (feeds.from_yahoo interval='5m') live.
+    """
+    rng = np.random.default_rng(seed)
+    days = pd.bdate_range(end=pd.Timestamp("2025-12-31"), periods=n_days)
+    stamps, closes = [], []
+    price = start_price
+    for day in days:
+        price *= np.exp(rng.normal(0.0002, 0.008))          # overnight gap
+        # AR(1) with negative coefficient -> intraday mean reversion
+        shocks = rng.normal(0, 0.0011, bars_per_day)
+        r = np.empty(bars_per_day)
+        prev = 0.0
+        for k in range(bars_per_day):
+            r[k] = -0.15 * prev + shocks[k]
+            prev = r[k]
+        path = price * np.exp(np.cumsum(r))
+        closes.extend(path)
+        price = path[-1]
+        t0 = day + pd.Timedelta(hours=9, minutes=30)
+        stamps.extend(t0 + pd.Timedelta(minutes=5 * k) for k in range(bars_per_day))
+
+    close = np.asarray(closes)
+    n = len(close)
+    noise = rng.normal(0, 0.0006, n)
+    open_ = close * (1 + noise)
+    high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.0008, n)))
+    low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.0008, n)))
+    volume = rng.lognormal(mean=10.0, sigma=0.4, size=n)
+    df = pd.DataFrame({"open": open_, "high": high, "low": low,
+                       "close": close, "volume": volume},
+                      index=pd.DatetimeIndex(stamps, name="date"))
+    return df
+
+
+def resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    """
+    Resample an intraday OHLCV frame to a coarser bar (e.g. 5m -> "15min" / "30min").
+
+    Aggregates correctly (open=first, high=max, low=min, close=last, volume=sum)
+    and drops the empty overnight buckets. Use it to compare which candle interval
+    an intraday strategy prefers without re-downloading data. ``rule`` is any pandas
+    offset alias: "15min", "30min", "1h", ...
+    """
+    agg = {"open": "first", "high": "max", "low": "min",
+           "close": "last", "volume": "sum"}
+    cols = [c for c in agg if c in df.columns]
+    out = df[cols].resample(rule).agg({c: agg[c] for c in cols})
+    return out.dropna(subset=["open", "high", "low", "close"])
+
+
+def load_csv(path: str) -> pd.DataFrame:
+    """Load OHLCV data from a CSV with a `date` column."""
+    df = pd.read_csv(path, parse_dates=["date"])
+    df = df.set_index("date").sort_index()
+    expected = {"open", "high", "low", "close", "volume"}
+    missing = expected - set(df.columns.str.lower())
+    if missing:
+        raise ValueError(f"CSV missing columns: {missing}")
+    df.columns = [c.lower() for c in df.columns]
+    return df
