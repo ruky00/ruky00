@@ -51,7 +51,8 @@ def vwap_reversion(df, dev=0.004, exit_dev=0.0015, atr_window=14, allow_short=Tr
     sig[z.abs() < exit_dev] = 0
     sig = sig.groupby(day).ffill().fillna(0)
     return StrategySignal(sig.astype(int), ind.atr(df, atr_window),
-                          dict(dev=dev, exit_dev=exit_dev), execution="intraday")
+                          dict(dev=dev, exit_dev=exit_dev), execution="intraday",
+                          diag=z / dev)   # ±1.0 = entry threshold reached
 
 
 def opening_range(df, or_bars=6, atr_window=14, allow_short=True):
@@ -121,7 +122,8 @@ def vwap_snap(df, dev_z=2.0, exit_z=0.3, rsi_window=7, rsi_low=30.0, rsi_high=70
     sig = sig.groupby(day).ffill().fillna(0)
     return StrategySignal(sig.astype(int), ind.atr(df, atr_window),
                           dict(dev_z=dev_z, exit_z=exit_z, rsi_low=rsi_low,
-                               rsi_high=rsi_high), execution="intraday")
+                               rsi_high=rsi_high), execution="intraday",
+                          diag=z / dev_z)  # ±1.0 = entry threshold reached
 
 
 def intraday_auto(df, adx_threshold=25.0, atr_window=14):
@@ -145,9 +147,14 @@ INTRADAY_REGISTRY = {
 }
 
 # Parameter grids for walk-forward / selection on intraday bars.
+# vwap_reversion's dev is a raw fraction, so the grid must span BOTH stock-scale
+# (0.3-0.8% intraday stretches) and FX-scale vol (EURGBP moves ~0.4%/day — its
+# tradeable VWAP stretches are 0.05-0.15%). vwap_snap needs no such split: its
+# z-score threshold self-adapts to each symbol's vol.
 INTRADAY_GRIDS = {
     "vwap_snap": {"dev_z": [1.8, 2.0, 2.4], "rsi_low": [25.0, 30.0], "exit_z": [0.3, 0.5]},
-    "vwap_reversion": {"dev": [0.003, 0.005, 0.008], "exit_dev": [0.001, 0.002]},
+    "vwap_reversion": {"dev": [0.0008, 0.0015, 0.003, 0.005, 0.008],
+                       "exit_dev": [0.0003, 0.001, 0.002]},
     "opening_range": {"or_bars": [3, 6, 12]},
     "intraday_momentum": {"fast": [5, 9], "slow": [21, 34], "no_entry_last": [3, 6]},
 }

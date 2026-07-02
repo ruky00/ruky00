@@ -450,7 +450,15 @@ def main():
                     posdesc = f"{'LONG' if p['qty']>0 else 'SHORT'} {abs(p['qty']):g}@{p['entry']:.2f}"
                     rows.append(f"  {sym:<5} {price:>8.2f} sig {s:+d}  {posdesc}{sltp}  uP&L {upnl:+,.0f}")
                 else:
-                    rows.append(f"  {sym:<5} {price:>8.2f} sig {s:+d}  flat  {action}")
+                    # how stretched is the market vs the entry threshold? ±100% = fires
+                    dist = ""
+                    if sig.diag is not None:
+                        try:
+                            d = float(sig.diag.iloc[-2])
+                            dist = f"  stretch {d*100:+.0f}% (±100% = señal)"
+                        except (ValueError, TypeError):
+                            pass
+                    rows.append(f"  {sym:<5} {price:>8.2f} sig {s:+d}  flat{dist}  {action}")
 
             pnl = equity - start_equity
             halt = "  🛑 HALTED" if (gov and gov.state.halted) else ""

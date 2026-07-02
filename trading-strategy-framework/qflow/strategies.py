@@ -30,6 +30,10 @@ class StrategySignal:
     atr: pd.Series
     params: dict
     execution: str = "swing"   # "swing" (multi-day, ATR stops) or "intraday" (open->close)
+    # optional live diagnostic: signed fraction of the entry threshold reached
+    # (-1/+1 = a short/long entry fires). Lets the bot show "how close" a quiet
+    # symbol is to signalling instead of an opaque "flat".
+    diag: pd.Series | None = None
 
 
 # --------------------------------------------------------------------------- #
