@@ -403,16 +403,27 @@ class IBKRBroker(BrokerAdapter):
         # and could open a REVERSE position when later touched)
         for t in self.ib.openTrades():
             if self._pos_symbol(t.contract) == symbol and t.orderStatus.status not in (
-                    "Filled", "Cancelled", "ApiCancelled", "Inactive"):
-                self.ib.cancelOrder(t.order)
+                    "Filled", "Cancelled", "ApiCancelled", "Inactive", "PendingCancel"):
+                try:
+                    self.ib.cancelOrder(t.order)
+                except Exception:
+                    pass                      # already gone (OCO sibling) — harmless
 
     def flatten(self, symbol=None):
+        from ib_insync import MarketOrder
         for p in self.ib.positions():
             if symbol and self._pos_symbol(p.contract) != symbol:
                 continue
+            contract = p.contract
+            # positions() returns contracts with no exchange set -> a market order
+            # on them is rejected with error 321 ("missing order's market"),
+            # especially for forex. Restore the routing before sending.
+            if not contract.exchange:
+                contract.exchange = "IDEALPRO" if contract.secType == "CASH" else "SMART"
             action = "SELL" if p.position > 0 else "BUY"
-            from ib_insync import MarketOrder
-            self.ib.placeOrder(p.contract, MarketOrder(action, abs(p.position)))
+            order = MarketOrder(action, abs(p.position))
+            order.tif = self.tif              # match the account preset (avoid 10349)
+            self.ib.placeOrder(contract, order)
 
 
 # --------------------------------------------------------------------------- #

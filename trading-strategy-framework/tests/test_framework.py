@@ -290,6 +290,36 @@ def test_round_price_per_venue():
     assert m.round_price("USDJPY", 157.123456) == 157.123
 
 
+def test_ibkr_forex_flatten_restores_exchange():
+    # flatten must set the routing on the position's contract, else IBKR rejects
+    # the close order with error 321 ("missing order's market") — the live bug.
+    import sys, types
+    from qflow import broker as brk
+
+    if "ib_insync" not in sys.modules:            # stub it in the sandbox
+        stub = types.ModuleType("ib_insync")
+        class MarketOrder:
+            def __init__(s, action, qty): s.action, s.totalQuantity, s.tif = action, qty, ""
+        stub.MarketOrder = MarketOrder
+        sys.modules["ib_insync"] = stub
+
+    class C:                       # forex position contract as returned by positions()
+        secType = "CASH"; symbol = "EUR"; localSymbol = "EUR.USD"; exchange = ""
+    class P:
+        contract = C(); position = -43568.0
+    class FakeIB:
+        def __init__(s): s.orders = []
+        def positions(s): return [P()]
+        def placeOrder(s, contract, order): s.orders.append((contract, order))
+
+    b = brk.IBKRBroker(port=7497)
+    b.ib = FakeIB()
+    b.flatten("EURUSD")
+    contract, order = b.ib.orders[0]
+    assert contract.exchange == "IDEALPRO"      # routing restored (was "")
+    assert order.action == "BUY" and order.totalQuantity == 43568.0  # closes the short
+
+
 def test_fx_and_european_symbols():
     from qflow import broker as brk, feeds
     # FX pair detection

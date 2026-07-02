@@ -66,6 +66,8 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import warnings
+
+import pandas as pd
 warnings.filterwarnings("ignore")
 
 from qflow import feeds, strategies, intraday_select, broker as brk
@@ -80,6 +82,11 @@ def size(capital, risk, atr, stop_atr, price):
     qty = int((capital * risk) / stop_dist)
     qty = min(qty, int((capital * 0.05) / max(price, 0.01)))
     return max(1, qty)
+
+
+def _px(sym, price):
+    """Format a price with FX precision (5 decimals) or stock precision (2)."""
+    return f"{price:>9.5f}" if brk.is_fx_pair(sym) else f"{price:>8.2f}"
 
 
 def fetch_bars(broker, sym, interval, count=800, yahoo_rng="5d"):
@@ -370,29 +377,31 @@ def main():
                 price = float(df["close"].iloc[-1])
                 held = sym in positions and abs(positions[sym]["qty"]) > 0
                 if not held and sym in book:
-                    bk = book.pop(sym)                         # exited via SL/TP at broker
+                    bk = book.pop(sym)                # confirmed closed at the broker
                     if jrn:
                         signed = bk["qty"] if bk["side"] == "BUY" else -bk["qty"]
-                        jrn.log_exit(ts, sym, price, signed * (price - bk["entry"]))
+                        reason = "time" if bk.get("flattening") else "exit"
+                        jrn.log_exit(ts, sym, price, signed * (price - bk["entry"]), reason=reason)
 
-                # live time-stop: thesis stale after max_bars without SL/TP -> flatten
+                # live time-stop: thesis stale after max_bars without SL/TP -> flatten.
+                # We do NOT pop `book` here: only the "confirmed closed" branch above
+                # pops it, so if the flatten is rejected (e.g. broker hiccup) the
+                # position is never silently lost — it retries next poll, and the
+                # legs are cancelled once so it's not left unprotected + re-armed.
                 if held and sym in book and exits.get("max_bars"):
                     bars_held = (df.index[-1] - book[sym].get("entry_ts", df.index[-1])) \
-                                / (df.index[-1] - df.index[-2])
+                                / max(df.index[-1] - df.index[-2], pd.Timedelta(seconds=1))
                     if bars_held >= exits["max_bars"]:
                         try:
-                            broker.cancel_all(sym)      # kill SL/TP legs first (IBKR)
-                            broker.flatten(sym)
-                            bk = book.pop(sym)
-                            if jrn:
-                                signed = bk["qty"] if bk["side"] == "BUY" else -bk["qty"]
-                                jrn.log_exit(ts, sym, price,
-                                             signed * (price - bk["entry"]), reason="time")
-                            rows.append(f"  {sym:<5} {price:>8.2f} ⏱ time-stop "
-                                        f"({exits['max_bars']} bars) — flattened")
-                            continue
-                        except Exception:
-                            pass
+                            if not book[sym].get("flattening"):
+                                broker.cancel_all(sym)        # kill SL/TP legs once
+                                book[sym]["flattening"] = True
+                            broker.flatten(sym)               # (re)send close; retries if rejected
+                            rows.append(f"  {sym:<5} {_px(sym, price)} ⏱ time-stop "
+                                        f"({exits['max_bars']} bars) — closing")
+                        except Exception as e:
+                            rows.append(f"  {sym:<5} ⚠️ time-stop flatten error ({type(e).__name__})")
+                        continue
 
                 # funded mode drives risk dynamically (greedy w/ cushion, throttled near limits)
                 risk = fund.risk_fraction() if fund else args.risk
@@ -446,9 +455,10 @@ def main():
                     p = positions[sym]
                     bk = book.get(sym, {})
                     upnl = p["qty"] * (price - p["entry"])
-                    sltp = (f" SL {bk.get('sl','?')} TP {bk.get('tp','?')}" if bk else "")
-                    posdesc = f"{'LONG' if p['qty']>0 else 'SHORT'} {abs(p['qty']):g}@{p['entry']:.2f}"
-                    rows.append(f"  {sym:<5} {price:>8.2f} sig {s:+d}  {posdesc}{sltp}  uP&L {upnl:+,.0f}")
+                    sltp = (f" SL {bk.get('sl','?')} TP {bk.get('tp','?')}" if bk
+                            else "  ⚠️ no SL/TP tracked")
+                    posdesc = f"{'LONG' if p['qty']>0 else 'SHORT'} {abs(p['qty']):g}@{_px(sym,p['entry']).strip()}"
+                    rows.append(f"  {sym:<5} {_px(sym,price)} sig {s:+d}  {posdesc}{sltp}  uP&L {upnl:+,.0f}")
                 else:
                     # how stretched is the market vs the entry threshold? ±100% = fires
                     dist = ""
@@ -458,7 +468,7 @@ def main():
                             dist = f"  stretch {d*100:+.0f}% (±100% = señal)"
                         except (ValueError, TypeError):
                             pass
-                    rows.append(f"  {sym:<5} {price:>8.2f} sig {s:+d}  flat{dist}  {action}")
+                    rows.append(f"  {sym:<5} {_px(sym,price)} sig {s:+d}  flat{dist}  {action}")
 
             pnl = equity - start_equity
             halt = "  🛑 HALTED" if (gov and gov.state.halted) else ""
