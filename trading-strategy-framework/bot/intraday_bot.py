@@ -28,6 +28,14 @@ Run (Python 3.12 venv, IB Gateway paper open on 4002):
     python bot/intraday_bot.py --strategy mean_reversion --allow-short --kill-switches
     python bot/intraday_bot.py --minutes 120     # stop & flatten after 2h
 
+    # VALIDATE THE CHALLENGE BOT on IBKR paper — exactly the FundedNext behaviour
+    # (exam rules, auto-select, exit presets, time-stop, journal), just executing
+    # on IB Gateway with stocks while the MT5 challenge account isn't live yet:
+    python bot/intraday_bot.py --broker ibkr --port 4002 \
+        --fundednext stellar_2step_p1 --auto-select --allow-short \
+        --symbols NVDA,AMD,TSLA,AAPL \
+        --journal logs/validate.csv --select-cache logs/sel.json
+
     # fully autonomous funded-account run: self-select + exam rules on
     python bot/intraday_bot.py --auto-select --funded --allow-short \
         --profit-target 0.08 --max-daily-loss 0.05 --max-total-drawdown 0.10
@@ -346,6 +354,7 @@ def main():
                                 / (df.index[-1] - df.index[-2])
                     if bars_held >= exits["max_bars"]:
                         try:
+                            broker.cancel_all(sym)      # kill SL/TP legs first (IBKR)
                             broker.flatten(sym)
                             bk = book.pop(sym)
                             if jrn:
@@ -385,20 +394,20 @@ def main():
                             sl = price - stop_dist if side == "BUY" else price + stop_dist
                             tgt_dist = exits["target_atr"] * atr
                             tp = price + tgt_dist if side == "BUY" else price - tgt_dist
-                            # 5 decimals: enough for FX (1.08765) and harmless for stocks
+                            # venue tick: $0.01 on IBKR stocks, symbol digits on MT5
+                            sl, tp = broker.round_price(sym, sl), broker.round_price(sym, tp)
                             res = broker.place_bracket(sym, q, side, entry=price,
-                                                       stop=round(sl, 5), target=round(tp, 5))
+                                                       stop=sl, target=tp)
                             trades += 1
                             if gov:
                                 gov.on_open(risk_amt)
                             if fund:
                                 fund.on_open()
                             book[sym] = {"side": side, "qty": q, "entry": price,
-                                         "sl": round(sl, 5), "tp": round(tp, 5),
-                                         "entry_ts": df.index[-1]}
+                                         "sl": sl, "tp": tp, "entry_ts": df.index[-1]}
                             if jrn:
-                                jrn.log_entry(ts, sym, side, q, price, round(sl, 5),
-                                              round(tp, 5), risk * 100, name, interval)
+                                jrn.log_entry(ts, sym, side, q, price, sl, tp,
+                                              risk * 100, name, interval)
                             emoji = "🟢" if side == "BUY" else "🔴"
                             action = f"{emoji} {side} {q} @{risk*100:.2f}% [{res.status}]"
                 except Exception as e:

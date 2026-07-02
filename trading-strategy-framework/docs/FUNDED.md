@@ -11,6 +11,25 @@ webhook) presets and connectors, the per-trade journal, and the selection cache.
 **Which firm?** FundedNext (CFD/Forex on MT5) is the recommended path — MT5 gives
 a real two-way API. Lucid (futures) is reachable one-way via a webhook bridge.
 
+## Validation path: IBKR paper first, MT5 challenge after
+
+A FundedNext *demo dashboard* is not an MT5 login, so the challenge bot is
+validated on **IB Gateway paper** first — same exam engine, same auto-select,
+same exit presets and time-stop, same journal; only the execution venue (stocks
+on IBKR instead of CFDs on MT5) differs:
+
+```bash
+python bot/intraday_bot.py --broker ibkr --port 4002 \
+    --fundednext stellar_2step_p1 --auto-select --allow-short \
+    --symbols NVDA,AMD,TSLA,AAPL \
+    --journal logs/validate.csv --select-cache logs/sel.json
+```
+
+Watch the exam status line and the journal's win-rate/expectancy for 1-2 weeks.
+When it's consistently green, buy the MT5 challenge and switch **only the broker
+flags** (`--broker mt5 --mt5-login ... --mt5-server ...` + FX symbols) — every
+other behaviour is identical by construction.
+
 ## The engine (`qflow/funded.py`)
 
 `FundedAccount` encodes a challenge as hard limits and drives sizing:

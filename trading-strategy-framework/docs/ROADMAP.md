@@ -37,7 +37,7 @@ and purpose.
   intraday momentum, and the `intraday_auto` combiner) with per-strategy
   parameter grids, an interval sweep (5m/15m/30m via `data.resample_ohlcv`) and
   intraday walk-forward (`examples/research/intraday_lab.py`).
-- 53 passing tests.
+- 54 passing tests.
 
 **The Funded Bot (product 2)**
 - `bot/intraday_bot.py`: runs qflow strategies on 5-minute bars, ATR SL/TP

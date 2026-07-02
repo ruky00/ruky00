@@ -273,6 +273,22 @@ def test_mt5_broker_two_way_with_fake_terminal():
     assert f.sent[-1]["action"] == f.TRADE_ACTION_DEAL and "position" in f.sent[-1]  # closed by ticket
 
 
+def test_round_price_per_venue():
+    from qflow import broker as brk
+    # default (base / webhook): 5 decimals — FX-safe
+    assert brk.PaperBroker().round_price("EURUSD", 1.0876543) == 1.08765
+    # IBKR stocks tick at $0.01 (round(sl,5) would get rejected by IBKR)
+    ib = brk.IBKRBroker(port=7497)                  # constructor is offline-safe
+    assert ib.round_price("NVDA", 123.456789) == 123.46
+    # MT5 uses each symbol's declared digits
+    class FakeM:
+        def symbol_info(self, sym):
+            class SI: digits = 3
+            return SI()
+    m = brk.MT5Broker(mt5=FakeM())
+    assert m.round_price("USDJPY", 157.123456) == 157.123
+
+
 def test_funded_fundednext_presets():
     from qflow.funded import FundedAccount
     fa = FundedAccount.from_fundednext("stellar_1step")

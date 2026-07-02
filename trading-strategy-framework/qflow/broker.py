@@ -91,6 +91,11 @@ class BrokerAdapter:
         its own share sizer). `stop_dist` is the stop distance in price."""
         return None
 
+    def round_price(self, symbol: str, price: float) -> float:
+        """Round a price to the venue's tick. Default 5 decimals (FX-safe);
+        brokers with coarser ticks (e.g. US stocks at 0.01) override."""
+        return round(price, 5)
+
 
 # --------------------------------------------------------------------------- #
 # Paper broker — in-memory, no dependencies (default / testing)
@@ -348,8 +353,20 @@ class IBKRBroker(BrokerAdapter):
                              side=side.upper(), qty=qty, entry=price, stop=0.0,
                              target=0.0, status="submitted", broker=self.name)
 
+    def round_price(self, symbol, price):
+        return round(price, 2)               # US stocks tick at $0.01
+
     def cancel_all(self, symbol=None):
-        self.ib.reqGlobalCancel()
+        if symbol is None:
+            self.ib.reqGlobalCancel()
+            return
+        # per-symbol: cancel only this contract's working orders (e.g. the SL/TP
+        # bracket legs before a time-stop flatten — else they'd survive the close
+        # and could open a REVERSE position when later touched)
+        for t in self.ib.openTrades():
+            if t.contract.symbol == symbol and t.orderStatus.status not in (
+                    "Filled", "Cancelled", "ApiCancelled", "Inactive"):
+                self.ib.cancelOrder(t.order)
 
     def flatten(self, symbol=None):
         for p in self.ib.positions():
@@ -575,6 +592,12 @@ class MT5Broker(BrokerAdapter):
             else df.get("tick_volume", 0)
         return pd.DataFrame({"open": df["open"], "high": df["high"], "low": df["low"],
                              "close": df["close"], "volume": vol}, index=df.index)
+
+    def round_price(self, symbol, price):
+        m = self._mt5
+        info = m.symbol_info(symbol)
+        digits = getattr(info, "digits", 5) if info is not None else 5
+        return round(price, digits)          # each MT5 symbol declares its digits
 
     def size_for_risk(self, symbol, risk_amount, stop_dist, price=0.0):
         """
