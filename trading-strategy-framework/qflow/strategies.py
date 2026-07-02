@@ -319,3 +319,4 @@ REGISTRY = {
 from . import intraday_strategies as _intraday   # noqa: E402
 REGISTRY.update(_intraday.INTRADAY_REGISTRY)
 INTRADAY_GRIDS = _intraday.INTRADAY_GRIDS
+EXIT_PRESETS = _intraday.EXIT_PRESETS

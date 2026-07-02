@@ -87,6 +87,39 @@ def test_resample_ohlcv_aggregates():
     assert (r["low"] <= r[["open", "close"]].min(axis=1)).all()
 
 
+def test_vwap_snap_high_win_rate_with_fx_costs():
+    # the funded bot's flagship: z-score VWAP snap-back + RSI + session filters,
+    # traded with its asymmetric EXIT_PRESETS under FX-realistic costs.
+    df = data.synthetic_intraday(n_days=120, seed=11)
+    sig = strategies.REGISTRY["vwap_snap"](df)
+    assert sig.execution == "intraday" and sig.signal.isin([-1, 0, 1]).all()
+    ex = strategies.EXIT_PRESETS["vwap_snap"]
+    res = backtest.run_backtest(df, sig.signal, sig.atr, capital=100_000,
+                                risk_per_trade=0.004, flatten_eod=True,
+                                commission_bps=0.3, slippage_bps=0.2, **ex)
+    pnls = res.trade_pnls
+    assert len(pnls) > 300                                   # a real sample, not luck
+    assert metrics.win_rate(pnls) > 0.60                     # >60% of trades win
+    assert sum(pnls) > 0                                     # AND positive expectancy
+    # every strategy in the registry has an exit preset or falls back cleanly
+    for name in ["vwap_snap", "vwap_reversion", "opening_range",
+                 "intraday_momentum", "intraday_auto"]:
+        assert set(strategies.EXIT_PRESETS[name]) == {"stop_atr", "target_atr", "max_bars"}
+
+
+def test_backtest_time_stop():
+    df = data.synthetic_intraday(n_days=20, seed=3)
+    sig = strategies.REGISTRY["vwap_snap"](df)
+    res = backtest.run_backtest(df, sig.signal, sig.atr, capital=100_000,
+                                risk_per_trade=0.004, flatten_eod=True,
+                                stop_atr=5.0, target_atr=5.0, max_bars=4)
+    assert any(t.reason == "time" for t in res.trades)       # the time-stop fires
+    # and no trade lives longer than max_bars bars
+    pos = {ts: i for i, ts in enumerate(df.index)}
+    for t in res.trades:
+        assert pos[t.exit_date] - pos[t.entry_date] <= 4 + 1  # +1: fill on next open
+
+
 def test_intraday_walk_forward_oos():
     df = data.synthetic_intraday(n_days=90, seed=8)
     wf = optimize.walk_forward(df, "vwap_reversion",

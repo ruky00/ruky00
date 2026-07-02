@@ -45,6 +45,9 @@ from qflow import data, strategies, backtest, metrics, optimize
 CAPITAL = 100_000.0
 RISK = 0.002
 STOP_ATR, TARGET_ATR = 1.5, 2.5
+# FX-realistic costs (~0.5 pip round trip). Use 2+2 bps for stocks instead —
+# stock-level costs on EURUSD would be 4-9 pips and wrongly kill 5m reversion.
+COMMISSION_BPS, SLIPPAGE_BPS = 0.3, 0.2
 
 # 5m -> None (native), else a pandas offset alias. bars/day drives annualisation.
 INTERVALS = {
@@ -53,11 +56,18 @@ INTERVALS = {
     "30m": ("30min",  13),
 }
 
-STRATS = ["vwap_reversion", "opening_range", "intraday_momentum", "intraday_auto"]
+STRATS = ["vwap_snap", "vwap_reversion", "opening_range", "intraday_momentum",
+          "intraday_auto"]
 
 # Walk-forward grids (intraday_auto gets a small ADX-threshold grid here).
 GRIDS = dict(strategies.INTRADAY_GRIDS)
 GRIDS["intraday_auto"] = {"adx_threshold": [20.0, 25.0, 30.0]}
+
+
+def exits_for(name):
+    """Per-strategy exits (asymmetric for reversion) — same as the bot uses."""
+    return strategies.EXIT_PRESETS.get(
+        name, {"stop_atr": STOP_ATR, "target_atr": TARGET_ATR, "max_bars": 0})
 
 
 def _bars_for(df, rule):
@@ -94,8 +104,9 @@ def interval_sweep(df):
             bars = _bars_for(df, rule)
             sig = strategies.REGISTRY[name](bars)
             res = backtest.run_backtest(bars, sig.signal, sig.atr, capital=CAPITAL,
-                                        risk_per_trade=RISK, stop_atr=STOP_ATR,
-                                        target_atr=TARGET_ATR, flatten_eod=True)
+                                        risk_per_trade=RISK, flatten_eod=True,
+                                        commission_bps=COMMISSION_BPS,
+                                        slippage_bps=SLIPPAGE_BPS, **exits_for(name))
             s = _stats(res, bpd)
             out[(name, label)] = s
             print(f"{name:<18}{label:<9}{s['ret']*100:>8.1f}%{s['sharpe']:>8.2f}"
@@ -129,9 +140,10 @@ def walk_forward_best(df, best):
                                    train_frac=0.6, metric="sharpe",
                                    min_trades=3, capital=CAPITAL,
                                    bt_kwargs={"risk_per_trade": RISK,
-                                              "stop_atr": STOP_ATR,
-                                              "target_atr": TARGET_ATR,
-                                              "flatten_eod": True})
+                                              "flatten_eod": True,
+                                              "commission_bps": COMMISSION_BPS,
+                                              "slippage_bps": SLIPPAGE_BPS,
+                                              **exits_for(name)})
         results[name] = wf
         if "oos_stats" in wf:
             st = wf["oos_stats"]

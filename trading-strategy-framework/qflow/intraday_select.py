@@ -28,7 +28,8 @@ from . import data, strategies, optimize
 # interval label -> (resample rule or None for native 5m, bars/day for annualising)
 INTERVALS = {"5m": (None, 78), "15m": ("15min", 26), "30m": ("30min", 13)}
 
-STRATS = ["vwap_reversion", "opening_range", "intraday_momentum", "intraday_auto"]
+STRATS = ["vwap_snap", "vwap_reversion", "opening_range", "intraday_momentum",
+          "intraday_auto"]
 
 # walk-forward grids (intraday_auto gets a small ADX grid)
 GRIDS = dict(strategies.INTRADAY_GRIDS)
@@ -40,19 +41,29 @@ def _bars(df, rule):
 
 
 def evaluate(df, strats=None, intervals=None, capital=100_000.0, risk=0.004,
-             stop_atr=1.5, target_atr=2.5, n_splits=3, train_frac=0.6):
+             stop_atr=1.5, target_atr=2.5, n_splits=3, train_frac=0.6,
+             commission_bps=2.0, slippage_bps=2.0):
     """
     Walk-forward every (strategy, interval) on `df` (native 5m bars).
 
+    Exits come from strategies.EXIT_PRESETS per strategy (falling back to the
+    stop_atr/target_atr arguments), so what gets validated here is what the bot
+    will actually trade. Pass FX-realistic costs (e.g. 0.3 + 0.2 bps) when the
+    bars are FX from MT5 — stock-level costs (2+2 bps ~ 4-9 pips on EURUSD)
+    wrongly kill high-frequency reversion edges.
+
     Returns a list of dicts sorted by OOS Sharpe (best first), each:
-        {strategy, interval, oos_sharpe, oos_return, oos_maxdd, folds}
+        {strategy, interval, oos_sharpe, oos_return, oos_maxdd, win_rate, folds}
     """
     strats = strats or STRATS
     intervals = intervals or list(INTERVALS)
-    bt = {"risk_per_trade": risk, "stop_atr": stop_atr,
-          "target_atr": target_atr, "flatten_eod": True}
     rows = []
     for name in strats:
+        exits = strategies.EXIT_PRESETS.get(
+            name, {"stop_atr": stop_atr, "target_atr": target_atr, "max_bars": 0})
+        bt = {"risk_per_trade": risk, "flatten_eod": True,
+              "commission_bps": commission_bps, "slippage_bps": slippage_bps,
+              **exits}
         for label in intervals:
             rule, _ = INTERVALS[label]
             bars = _bars(df, rule)

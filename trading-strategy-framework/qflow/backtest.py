@@ -69,6 +69,7 @@ def run_backtest(
     slippage_bps: float = 2.0,
     allow_short: bool = True,
     flatten_eod: bool = False,        # intraday: force-flat at each session's close
+    max_bars: int = 0,                # time-stop: exit after N bars in trade (0 = off)
 ) -> BacktestResult:
     """
     Walk bar-by-bar. A position is opened when the target signal flips to
@@ -77,7 +78,9 @@ def run_backtest(
 
     With ``flatten_eod=True`` any open position is closed on the last bar of each
     calendar day (nothing held overnight) — use this to backtest intraday
-    strategies on intraday bars.
+    strategies on intraday bars. ``max_bars`` is a classic intraday time-stop:
+    if neither stop nor target is hit within N bars, the thesis is stale — exit
+    at the close instead of holding a coin-flip into the session end.
     """
     close = df["close"].values
     open_ = df["open"].values
@@ -121,6 +124,10 @@ def run_backtest(
             # Signal-driven exit (flip to flat or opposite) at this close
             if exit_px is None and sig[i] != pos:
                 exit_px, reason = close[i], "signal"
+
+            # Time-stop: thesis stale after max_bars without hitting SL/TP
+            if exit_px is None and max_bars and (i - entry_idx) >= max_bars:
+                exit_px, reason = close[i], "time"
 
             # Intraday: never hold overnight — close on the session's last bar
             if exit_px is None and flatten_eod and is_session_end[i]:

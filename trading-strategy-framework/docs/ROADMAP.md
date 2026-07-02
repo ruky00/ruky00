@@ -37,7 +37,7 @@ and purpose.
   intraday momentum, and the `intraday_auto` combiner) with per-strategy
   parameter grids, an interval sweep (5m/15m/30m via `data.resample_ohlcv`) and
   intraday walk-forward (`examples/research/intraday_lab.py`).
-- 51 passing tests.
+- 53 passing tests.
 
 **The Funded Bot (product 2)**
 - `bot/intraday_bot.py`: runs qflow strategies on 5-minute bars, ATR SL/TP
@@ -71,10 +71,15 @@ and purpose.
 2b. ✅ **Dedicated intraday strategies + interval selection + walk-forward**
    (`qflow/intraday_strategies.py`, `examples/research/intraday_lab.py`): VWAP
    reversion, opening-range breakout, intraday momentum and `intraday_auto`,
-   swept across 5m/15m/30m and validated out-of-sample. Finding on synthetic
-   data: coarser bars (30m) bleed far less to costs than 5m, and only the
-   VWAP-reversion edge survives the walk-forward — a template to re-run on real
-   5m bars for the names the bot will trade.
+   swept across 5m/15m/30m and validated out-of-sample.
+2c. ✅ **High-win-rate flagship `vwap_snap`** + **per-strategy EXIT_PRESETS** +
+   **time-stop in the engine** (`max_bars`): z-score VWAP snap-back with RSI and
+   session-time filters, traded with an asymmetric bracket (TP 1×ATR / SL 2×ATR /
+   8-bar time-stop) under FX-realistic costs. On synthetic 5m (multi-seed):
+   **59-66% win rate with positive expectancy**, OOS walk-forward positive.
+   Key insight: stock-level cost assumptions (2+2 bps ≈ 4-9 pips) wrongly kill
+   FX reversion — the selector now takes real costs (`--costs-bps`, auto 1bp on
+   MT5). Live bot mirrors the exact same exits + time-stop.
 3. **Session controls**: auto-flat before the close, no new entries in the last
    30 min, max trades/day, max concurrent positions.
 4. ✅ **Funded-account rules engine** (`qflow/funded.py`, `--funded` / `--lucid`):

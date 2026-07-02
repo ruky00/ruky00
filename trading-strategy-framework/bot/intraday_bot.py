@@ -84,31 +84,35 @@ def fetch_bars(broker, sym, interval, count=800, yahoo_rng="5d"):
 
 
 def build_plan(broker, symbols, default_name, default_interval, auto_select,
-               cache_path=None, reselect_hours=24.0):
+               cache_path=None, reselect_hours=24.0, costs_bps=4.0,
+               default_exits=None, use_presets=True):
     """
-    Decide, per symbol, which (strategy, interval) to trade.
+    Decide, per symbol, which (strategy, interval, exits) to trade.
 
     With --auto-select the bot is self-sufficient: it pulls ~60d of 5-minute bars
     and walk-forwards the intraday strategies across 5m/15m/30m, keeping the best
     out-of-sample (strategy, interval). With a cache path it reuses a fresh choice
     instead of re-running the walk-forward each startup. If nothing clears the bar
-    (or data is missing) it falls back to the CLI default.
-    Returns {sym: (name, fn, interval)}.
+    (or data is missing) it falls back to the CLI default. Exits (SL/TP/time-stop)
+    come from strategies.EXIT_PRESETS so live behaviour matches the validation.
+    Returns {sym: (name, fn, interval, exits)}.
     """
     plan = {}
+    half = costs_bps / 2.0
     for sym in symbols:
         name, interval = default_name, default_interval
         if auto_select:
             try:
                 loader = lambda s=sym: fetch_bars(broker, s, "5m", count=8000,
                                                   yahoo_rng="60d")
+                sel_kw = dict(min_sharpe=0.0, commission_bps=half, slippage_bps=half)
                 if cache_path:
                     choice = intraday_select.select_cached(
                         sym, loader, cache_path=cache_path,
-                        max_age_hours=reselect_hours, min_sharpe=0.0)
+                        max_age_hours=reselect_hours, **sel_kw)
                     tag = " (cached)" if (choice and choice.get("cached")) else ""
                 else:
-                    choice = intraday_select.select_best(loader(), min_sharpe=0.0)
+                    choice = intraday_select.select_best(loader(), **sel_kw)
                     tag = ""
                 if choice:
                     name, interval = choice["strategy"], choice["interval"]
@@ -120,7 +124,10 @@ def build_plan(broker, symbols, default_name, default_interval, auto_select,
             except Exception as e:
                 print(f"   auto-select {sym:<5} -> data/selection error "
                       f"({type(e).__name__}); using default {name} @ {interval}")
-        plan[sym] = (name, strategies.REGISTRY[name], interval)
+        exits = dict(default_exits or {"stop_atr": 1.5, "target_atr": 2.5, "max_bars": 0})
+        if use_presets and name in strategies.EXIT_PRESETS:
+            exits = dict(strategies.EXIT_PRESETS[name])
+        plan[sym] = (name, strategies.REGISTRY[name], interval, exits)
     return plan
 
 
@@ -154,6 +161,11 @@ def main():
                     help="re-run auto-select when the cached choice is older than this")
     ap.add_argument("--journal", default="",
                     help="append every entry/exit to this CSV (live win-rate/expectancy)")
+    ap.add_argument("--costs-bps", type=float, default=-1.0,
+                    help="round-trip cost assumption for auto-select backtests "
+                         "(-1 = auto: 1bp for mt5/FX, 4bps otherwise)")
+    ap.add_argument("--no-exit-presets", action="store_true",
+                    help="ignore per-strategy EXIT_PRESETS and use --stop-atr/--target-atr")
     ap.add_argument("--port", type=int, default=4002)
     ap.add_argument("--client-id", type=int, default=7)
     ap.add_argument("--capital", type=float, default=1_000_000.0)
@@ -212,9 +224,16 @@ def main():
     print(f"🤖 INTRADAY BOT | {mode} | {args.broker}:{broker.account_label()} | {symbols}")
     if args.auto_select:
         print("   picking the best (strategy, interval) per symbol out-of-sample...")
+    costs = args.costs_bps if args.costs_bps >= 0 else (1.0 if args.broker == "mt5" else 4.0)
     plan = build_plan(broker, symbols, args.strategy, args.interval, args.auto_select,
                       cache_path=args.select_cache or None,
-                      reselect_hours=args.reselect_hours)
+                      reselect_hours=args.reselect_hours, costs_bps=costs,
+                      default_exits={"stop_atr": args.stop_atr,
+                                     "target_atr": args.target_atr, "max_bars": 0},
+                      use_presets=not args.no_exit_presets)
+    for _s, (_n, _f, _iv, _ex) in plan.items():
+        mb = f" time-stop {_ex['max_bars']} bars" if _ex.get("max_bars") else ""
+        print(f"   exits {_s:<5} -> SL {_ex['stop_atr']}xATR / TP {_ex['target_atr']}xATR{mb}")
 
     try:
         start_equity = float(broker.account().get("equity", args.capital))
@@ -301,7 +320,7 @@ def main():
 
             rows = []
             for sym in symbols:
-                name, fn, interval = plan[sym]
+                name, fn, interval, exits = plan[sym]
                 try:
                     df = fetch_bars(broker, sym, interval, count=800, yahoo_rng="5d")
                 except Exception as e:
@@ -316,10 +335,28 @@ def main():
                 price = float(df["close"].iloc[-1])
                 held = sym in positions and abs(positions[sym]["qty"]) > 0
                 if not held and sym in book:
-                    bk = book.pop(sym)                         # exited via SL/TP at IBKR
+                    bk = book.pop(sym)                         # exited via SL/TP at broker
                     if jrn:
                         signed = bk["qty"] if bk["side"] == "BUY" else -bk["qty"]
                         jrn.log_exit(ts, sym, price, signed * (price - bk["entry"]))
+
+                # live time-stop: thesis stale after max_bars without SL/TP -> flatten
+                if held and sym in book and exits.get("max_bars"):
+                    bars_held = (df.index[-1] - book[sym].get("entry_ts", df.index[-1])) \
+                                / (df.index[-1] - df.index[-2])
+                    if bars_held >= exits["max_bars"]:
+                        try:
+                            broker.flatten(sym)
+                            bk = book.pop(sym)
+                            if jrn:
+                                signed = bk["qty"] if bk["side"] == "BUY" else -bk["qty"]
+                                jrn.log_exit(ts, sym, price,
+                                             signed * (price - bk["entry"]), reason="time")
+                            rows.append(f"  {sym:<5} {price:>8.2f} ⏱ time-stop "
+                                        f"({exits['max_bars']} bars) — flattened")
+                            continue
+                        except Exception:
+                            pass
 
                 # funded mode drives risk dynamically (greedy w/ cushion, throttled near limits)
                 risk = fund.risk_fraction() if fund else args.risk
@@ -332,7 +369,7 @@ def main():
                         # funded account; fall back to nominal capital otherwise
                         risk_base = equity if fund else args.capital
                         risk_amt = risk_base * risk
-                        stop_dist = args.stop_atr * atr
+                        stop_dist = exits["stop_atr"] * atr
                         blocked = gov.can_open(risk_amt, equity) if gov else (True, "")
                         fund_ok = fund.can_open() if fund else (True, "")
                         if gov and not blocked[0]:
@@ -344,21 +381,24 @@ def main():
                             # else the equity share sizer; --fixed-qty overrides both
                             q = (args.fixed_qty
                                  or broker.size_for_risk(sym, risk_amt, stop_dist, price)
-                                 or size(risk_base, risk, atr, args.stop_atr, price))
-                            sl = price - args.stop_atr * atr if side == "BUY" else price + args.stop_atr * atr
-                            tp = price + args.target_atr * atr if side == "BUY" else price - args.target_atr * atr
+                                 or size(risk_base, risk, atr, exits["stop_atr"], price))
+                            sl = price - stop_dist if side == "BUY" else price + stop_dist
+                            tgt_dist = exits["target_atr"] * atr
+                            tp = price + tgt_dist if side == "BUY" else price - tgt_dist
+                            # 5 decimals: enough for FX (1.08765) and harmless for stocks
                             res = broker.place_bracket(sym, q, side, entry=price,
-                                                       stop=round(sl, 2), target=round(tp, 2))
+                                                       stop=round(sl, 5), target=round(tp, 5))
                             trades += 1
                             if gov:
                                 gov.on_open(risk_amt)
                             if fund:
                                 fund.on_open()
                             book[sym] = {"side": side, "qty": q, "entry": price,
-                                         "sl": round(sl, 2), "tp": round(tp, 2)}
+                                         "sl": round(sl, 5), "tp": round(tp, 5),
+                                         "entry_ts": df.index[-1]}
                             if jrn:
-                                jrn.log_entry(ts, sym, side, q, price, round(sl, 2),
-                                              round(tp, 2), risk * 100, name, interval)
+                                jrn.log_entry(ts, sym, side, q, price, round(sl, 5),
+                                              round(tp, 5), risk * 100, name, interval)
                             emoji = "🟢" if side == "BUY" else "🔴"
                             action = f"{emoji} {side} {q} @{risk*100:.2f}% [{res.status}]"
                 except Exception as e:
