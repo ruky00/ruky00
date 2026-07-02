@@ -280,6 +280,7 @@ def test_round_price_per_venue():
     # IBKR stocks tick at $0.01 (round(sl,5) would get rejected by IBKR)
     ib = brk.IBKRBroker(port=7497)                  # constructor is offline-safe
     assert ib.round_price("NVDA", 123.456789) == 123.46
+    assert ib.round_price("EURUSD", 1.0876543) == 1.08765   # but FX keeps 5
     # MT5 uses each symbol's declared digits
     class FakeM:
         def symbol_info(self, sym):
@@ -287,6 +288,25 @@ def test_round_price_per_venue():
             return SI()
     m = brk.MT5Broker(mt5=FakeM())
     assert m.round_price("USDJPY", 157.123456) == 157.123
+
+
+def test_fx_and_european_symbols():
+    from qflow import broker as brk, feeds
+    # FX pair detection
+    assert brk.is_fx_pair("EURUSD") and brk.is_fx_pair("gbpjpy")
+    assert not brk.is_fx_pair("NVDA") and not brk.is_fx_pair("SAN.MC")
+    # Yahoo mapping: FX gets =X, stocks unchanged
+    assert feeds.yahoo_symbol("EURUSD") == "EURUSD=X"
+    assert feeds.yahoo_symbol("NVDA") == "NVDA" and feeds.yahoo_symbol("SAN.MC") == "SAN.MC"
+    # VWAP strategies still fire when the feed has no volume (FX)
+    df = data.synthetic_intraday(n_days=30, seed=5)
+    df["volume"] = 0.0
+    for name in ["vwap_snap", "vwap_reversion"]:
+        s = strategies.REGISTRY[name](df)
+        assert (s.signal != 0).any(), name
+    # forex position key matches the pair the bot trades
+    class C: secType = "CASH"; localSymbol = "EUR.USD"; symbol = "EUR"
+    assert brk.IBKRBroker._pos_symbol(C()) == "EURUSD"
 
 
 def test_funded_fundednext_presets():

@@ -167,9 +167,18 @@ def from_stooq(symbol: str = "aapl.us", interval: str = "d") -> pd.DataFrame:
     return _normalise(df)
 
 
+def yahoo_symbol(symbol: str) -> str:
+    """Map a broker symbol to Yahoo's convention (EURUSD -> EURUSD=X)."""
+    from .broker import is_fx_pair
+    if is_fx_pair(symbol) and not symbol.upper().endswith("=X"):
+        return symbol.upper() + "=X"
+    return symbol
+
+
 def from_yahoo(symbol: str = "AAPL", rng: str = "5y", interval: str = "1d") -> pd.DataFrame:
-    """Yahoo Finance chart API. rng: 1y,2y,5y,10y,max. interval: 1d,1wk,1h."""
-    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    """Yahoo Finance chart API. rng: 1y,2y,5y,10y,max. interval: 1d,1wk,1h.
+    FX pairs (EURUSD) and European suffixes (SAN.MC) are accepted directly."""
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol(symbol)}"
            f"?range={rng}&interval={interval}")
     data = json.loads(_http_get(url))
     res = data["chart"]["result"][0]

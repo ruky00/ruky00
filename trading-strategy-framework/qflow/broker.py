@@ -22,6 +22,25 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 
 
+_FX_CCY = {"EUR", "USD", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF"}
+
+# European stock suffixes (Yahoo style) -> (IBKR primaryExchange, currency).
+# Lets the bot trade Madrid/Xetra/Paris/Amsterdam/Milan during European hours.
+_EU_SUFFIX = {
+    ".MC": ("BM", "EUR"),       # Bolsa de Madrid  (SAN.MC, BBVA.MC, ITX.MC)
+    ".DE": ("IBIS", "EUR"),     # Xetra            (SAP.DE, SIE.DE, BMW.DE)
+    ".PA": ("SBF", "EUR"),      # Euronext Paris   (MC.PA, AIR.PA)
+    ".AS": ("AEB", "EUR"),      # Euronext Amsterdam (ASML.AS)
+    ".MI": ("BVME", "EUR"),     # Borsa Italiana   (ENI.MI, ISP.MI)
+}
+
+
+def is_fx_pair(symbol: str) -> bool:
+    """True for 6-letter FX pairs like EURUSD / GBPJPY (both legs major ccys)."""
+    s = symbol.upper().replace("=X", "")
+    return len(s) == 6 and s[:3] in _FX_CCY and s[3:] in _FX_CCY
+
+
 def _ensure_event_loop():
     """Work around ib_insync/eventkit failing to import on Python >= 3.13/3.14.
 
@@ -270,11 +289,28 @@ class IBKRBroker(BrokerAdapter):
             return self.name
 
     def _contract(self, symbol):
-        from ib_insync import Stock
+        from ib_insync import Stock, Forex
+        # FX pair (EURUSD, GBPUSD, ...) -> IDEALPRO forex, trades ~24/5 — the
+        # closest IBKR analogue to a FundedNext CFD challenge instrument.
+        if is_fx_pair(symbol):
+            return Forex(symbol.upper().replace("=X", ""))
+        # European stock via Yahoo-style suffix (SAN.MC, SAP.DE, ...) so the
+        # bot can be tested during European market hours.
+        for suf, (prim, ccy) in _EU_SUFFIX.items():
+            if symbol.upper().endswith(suf):
+                return Stock(symbol.upper()[: -len(suf)], "SMART", ccy,
+                             primaryExchange=prim)
         if self.primary_exchange:
             return Stock(symbol, self.exchange, self.currency,
                          primaryExchange=self.primary_exchange)
         return Stock(symbol, self.exchange, self.currency)
+
+    @staticmethod
+    def _pos_symbol(contract) -> str:
+        """Position key matching the bot's symbols (forex reports base ccy only)."""
+        if getattr(contract, "secType", "") == "CASH":
+            return (contract.localSymbol or "").replace(".", "") or contract.symbol
+        return contract.symbol
 
     def account(self) -> dict:
         vals = {v.tag: v.value for v in self.ib.accountSummary()}
@@ -282,7 +318,7 @@ class IBKRBroker(BrokerAdapter):
                 "equity": float(vals.get("NetLiquidation", 0) or 0)}
 
     def positions(self) -> dict:
-        return {p.contract.symbol: {"qty": p.position, "entry": p.avgCost}
+        return {self._pos_symbol(p.contract): {"qty": p.position, "entry": p.avgCost}
                 for p in self.ib.positions()}
 
     def place_bracket(self, symbol, qty, side, entry, stop, target,
@@ -354,7 +390,9 @@ class IBKRBroker(BrokerAdapter):
                              target=0.0, status="submitted", broker=self.name)
 
     def round_price(self, symbol, price):
-        return round(price, 2)               # US stocks tick at $0.01
+        if is_fx_pair(symbol):
+            return round(price, 5)           # FX quotes to 0.00001 (JPY pairs: 0.001 ok too)
+        return round(price, 2)               # US/EU stocks tick at $0.01/€0.01
 
     def cancel_all(self, symbol=None):
         if symbol is None:
@@ -364,13 +402,13 @@ class IBKRBroker(BrokerAdapter):
         # bracket legs before a time-stop flatten — else they'd survive the close
         # and could open a REVERSE position when later touched)
         for t in self.ib.openTrades():
-            if t.contract.symbol == symbol and t.orderStatus.status not in (
+            if self._pos_symbol(t.contract) == symbol and t.orderStatus.status not in (
                     "Filled", "Cancelled", "ApiCancelled", "Inactive"):
                 self.ib.cancelOrder(t.order)
 
     def flatten(self, symbol=None):
         for p in self.ib.positions():
-            if symbol and p.contract.symbol != symbol:
+            if symbol and self._pos_symbol(p.contract) != symbol:
                 continue
             action = "SELL" if p.position > 0 else "BUY"
             from ib_insync import MarketOrder

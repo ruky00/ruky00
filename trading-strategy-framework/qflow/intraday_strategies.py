@@ -28,12 +28,20 @@ def _day(df):
     return df.index.normalize()
 
 
+def _volume(df):
+    """Volume for VWAP weighting; FX feeds report no volume -> equal weights
+    (the VWAP degrades gracefully to the session's running mean price)."""
+    v = df["volume"].fillna(0)
+    return v if v.sum() > 0 else pd.Series(1.0, index=df.index)
+
+
 def vwap_reversion(df, dev=0.004, exit_dev=0.0015, atr_window=14, allow_short=True):
     """Long when price is `dev` below the day's VWAP, short when above; exit near VWAP."""
     day = _day(df)
+    vol = _volume(df)
     tp = (df["high"] + df["low"] + df["close"]) / 3
-    pv = (tp * df["volume"]).groupby(day).cumsum()
-    vv = df["volume"].groupby(day).cumsum().replace(0, np.nan)
+    pv = (tp * vol).groupby(day).cumsum()
+    vv = vol.groupby(day).cumsum().replace(0, np.nan)
     vwap = pv / vv
     z = df["close"] / vwap - 1.0
     sig = pd.Series(np.nan, index=df.index)
@@ -94,9 +102,10 @@ def vwap_snap(df, dev_z=2.0, exit_z=0.3, rsi_window=7, rsi_low=30.0, rsi_high=70
     regime is present (the walk-forward decides that per symbol).
     """
     day = _day(df)
+    vol = _volume(df)
     tp = (df["high"] + df["low"] + df["close"]) / 3
-    pv = (tp * df["volume"]).groupby(day).cumsum()
-    vv = df["volume"].groupby(day).cumsum().replace(0, np.nan)
+    pv = (tp * vol).groupby(day).cumsum()
+    vv = vol.groupby(day).cumsum().replace(0, np.nan)
     z_raw = df["close"] / (pv / vv) - 1.0
     zstd = z_raw.rolling(z_window, min_periods=max(10, z_window // 3)).std().replace(0, np.nan)
     z = z_raw / zstd
